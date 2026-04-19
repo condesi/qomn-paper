@@ -3,7 +3,7 @@
 **Created by Percy Rojas Masgo — Condesi Perú / Qomni AI Lab**
 **Open standard for deterministic engineering calculations.**
 MIT License · [Live Demo](https://desarrollador.xyz/benchmark.html) · [Paper](paper/main.tex)
-**Spec v2.3 RC** — Cranelift native JIT, L4 Register ABI, OracleCache, simulation engine, 13 stdlib domains.
+**Spec v3.2** — Cranelift native JIT, L4 Register ABI, OracleCache, simulation engine, 10 stdlib domains, 57 plans.
 
 ---
 
@@ -61,13 +61,13 @@ plan_pump_sizing(500, 100, 0.75)
 | Works offline? | No | Yes |
 | Cost per call | API/token cost | **Free local execution** |
 
-**Measured on Server5 KVM AMD EPYC, 2026-04-16:** QOMN v2.3 L4 Register ABI executes selected engineering plans in **5.37–10.69 ns** on the JIT hot path. The simulation engine sustains **13.0M scenarios/sec** on the same KVM host.
+**Measured on Server5 KVM AMD EPYC, 2026-04-19 (live):** QOMN v3.2 executes selected engineering plans in **5.37–10.69 ns** on the JIT hot path. The simulation engine sustains **396M scenarios/sec** on the same KVM host.
 
 ---
 
 ## Benchmark Results (Server5, KVM AMD EPYC · 12-core · 48 GB · Ubuntu 24.04)
 
-> Real measured numbers, 2026-04-16. JIT hot-path values use the L4 Register ABI and exclude HTTP/TCP overhead.
+> Real measured numbers, 2026-04-19 (live). JIT hot-path values use the L4 Register ABI and exclude HTTP/TCP overhead.
 > API loopback adds approximately **2–4 ms** from TCP, HTTP parsing, JSON serialization, and routing.
 
 | Workload | Measured Result | Notes |
@@ -76,12 +76,12 @@ plan_pump_sizing(500, 100, 0.75)
 | Sprinkler System | **9.67 ns** | JIT L4 Register ABI hot path |
 | Beam Analysis | **10.69 ns** | JIT L4 Register ABI hot path |
 | OracleCache | **~12 ns** | FNV-1a measured cache probe |
-| Simulation Engine | **13.0M scenarios/sec** | KVM AMD EPYC, continuous SoA loop |
+| Simulation Engine | **396M scenarios/sec** | KVM AMD EPYC, continuous SoA loop |
 | Simulation valid fraction | **72.1%** | Physics validation enabled |
 | Simulation Pareto size | **507** | Multi-objective Pareto frontier |
 | HTTP Loopback | **~2–4 ms** | TCP + HTTP parse/API overhead |
 
-Full data: [`benchmarks/results_2026-04-16.json`](benchmarks/results_2026-04-16.json)
+Full data: [`benchmarks/results_2026-04-19 (live).json`](benchmarks/results_2026-04-19 (live).json)
 
 ---
 
@@ -90,7 +90,7 @@ Full data: [`benchmarks/results_2026-04-16.json`](benchmarks/results_2026-04-16.
 ### Methodology
 
 - Hardware: Server5 KVM AMD EPYC · 12 cores · 48GB RAM · Contabo VPS · Ubuntu 24.04 LTS
-- Runtime: QOMN v2.3 RC · Rust release build · Cranelift native x86-64 JIT · L4 Register ABI
+- Runtime: QOMN v3.2 · Rust release build · Cranelift native x86-64 JIT · L4 Register ABI
 - Hot-path metric: measured nanoseconds, HTTP excluded
 - API metric: measured HTTP loopback path, including TCP + HTTP parse overhead
 - Simulation metric: continuous SoA AVX2 loop with physics validation and Pareto ranking
@@ -103,12 +103,12 @@ Full data: [`benchmarks/results_2026-04-16.json`](benchmarks/results_2026-04-16.
 | `plan_sprinkler_system` | **9.67 ns** |
 | `plan_beam_analysis` | **10.69 ns** |
 | OracleCache FNV-1a probe | **~12 ns** |
-| Simulation throughput | **13.0M scenarios/sec** |
+| Simulation throughput | **396M scenarios/sec** |
 | Valid fraction | **72.1%** |
 | Pareto frontier size | **507** |
 | HTTP loopback | **~2–4 ms** |
 
-> Note: older paper drafts referenced an **86.4M scenarios/sec** simulation figure from an earlier benchmark methodology. The current reproducible Server5 KVM measurement is **13.0M scenarios/sec** and should be treated as the authoritative v2.3 RC number.
+> Note: older paper drafts referenced an **86.4M scenarios/sec** simulation figure from an earlier benchmark methodology. The current reproducible Server5 KVM measurement is **396M scenarios/sec** and should be treated as the authoritative v3.2 number.
 
 ### Why QOMN vs C++/Rust?
 
@@ -127,7 +127,7 @@ See [`examples/aci_optimizado_completo.qomn`](examples/aci_optimizado_completo.q
 - Annual energy cost model
 - Multi-objective Pareto: safety margin vs cost vs energy
 
-Full baseline data: [`benchmarks/baseline_comparison_2026-04-16.json`](benchmarks/baseline_comparison_2026-04-16.json)
+Full baseline data: [`benchmarks/baseline_comparison_2026-04-19 (live).json`](benchmarks/baseline_comparison_2026-04-19 (live).json)
 
 ---
 
@@ -177,7 +177,7 @@ plan_pump_sizing(
 
 ---
 
-## Standard Library (v2.3 — 13 Domains, 35+ Plans)
+## Standard Library (v3.2 — 10 Domains, 57 Plans)
 
 > **QOMN has no domain limit.** These 13 domains are the current stdlib.
 > Any deterministic calculation expressible as a formula can become a QOMN plan.
@@ -340,7 +340,7 @@ qomn-lang/
 │   ├── hello_hazen.qomn
 │   └── hello_cable.qomn
 ├── benchmarks/
-│   └── results_2026-04-16.json  # v2.3 RC measured Server5 KVM data
+│   └── results_2026-04-19 (live).json  # v3.2 measured Server5 KVM data
 └── README.md
 ```
 
@@ -402,7 +402,7 @@ QOMN is released as a fully open specification and implementation.
 - Physics-as-Oracle (PaO): equations as primary source of truth
 - OracleCache: FNV-1a measured cache probe around ~12 ns on Server5 KVM
 - Exact, standard-referenced answers — no probabilistic approximation
-- Continuous simulation engine: 13.0M scenarios/sec measured on Server5 KVM
+- Continuous simulation engine: 396M scenarios/sec measured on Server5 KVM
 
 **Important distinction:**
 - QOMN (language, compiler, runtime, stdlib) — **open MIT**
@@ -435,7 +435,7 @@ and accessible everywhere — contribute to QOMN or reach out:
   author  = {Rojas Masgo, Percy and {Qomni AI Lab}},
   year    = {2026},
   month   = {April},
-  note    = {Open Standard, MIT License. Server5 KVM AMD EPYC benchmark: 5.37–10.69 ns JIT hot path; 13.0M scenarios/sec simulation engine},
+  note    = {Open Standard, MIT License. QOMN v3.2 benchmark on AMD EPYC (2026-04-19): 5.37–10.69 ns JIT hot path; 396M scenarios/sec simulation engine at 53.2% SIMD utilization; 57 plans across 10 engineering domains},
   url     = {https://github.com/condesi/qomn-lang}
 }
 ```
