@@ -1,0 +1,32 @@
+{
+  "benchmark": "QOMN v2.3 — JIT L4 Register ABI + Simulation Engine (real measured)",
+  "date": "2026-04-16",
+  "server": "Server5 · KVM AMD EPYC · 12-core · 48 GB RAM · Ubuntu 24.04 LTS",
+  "method": "Real measured hot-path JIT latency using L4 Register ABI. Simulation engine measured using continuous SoA loop. HTTP loopback measured separately.",
+  "runtime": "QOMN v2.3 RC · Rust release build · Cranelift native x86-64 JIT",
+
+  "jit_hot_path_ns": {
+    "plan_pump_sizing": 5.37,
+    "plan_sprinkler_system": 9.67,
+    "plan_beam_analysis": 10.69
+  },
+
+  "simulation_engine": {
+    "throughput_scenarios_per_sec": 13000000,
+    "valid_fraction": 0.721,
+    "pareto_size": 507
+  },
+
+  "system_overhead": {
+    "http_loopback_ms": "~2-4",
+    "oracle_cache_probe_ns": "~12"
+  },
+
+  "notes": [
+    "All JIT latencies are hot-path measurements using L4 Register ABI.",
+    "HTTP/API latency includes TCP, HTTP parsing, JSON serialization, and routing.",
+    "Simulation throughput measured on KVM; bare-metal performance may be higher.",
+    "Previous benchmark values (v2.1 paper) used different methodology and are deprecated.",
+    "Current authoritative throughput: 13.0M scenarios/sec (Server5 KVM)."
+  ]
+}
