@@ -1,9 +1,15 @@
-# QOMN v2.3 — QOMN Language
+# QOMN v3.2 — Preprint Artifact
 
-**Created by Percy Rojas Masgo — Condesi Perú / Qomni AI Lab**
-**Open standard for deterministic engineering calculations.**
-MIT License · [Live Demo](https://desarrollador.xyz/benchmark.html) · [Paper](paper/main.tex)
-**Spec v3.2** — Cranelift native JIT, L4 Register ABI, OracleCache, simulation engine, 10 stdlib domains, 57 plans.
+**An Open-Source Domain-Specific Language and JIT Runtime for Deterministic Engineering Computation.**
+
+**Author:** Percy Rojas Masgo — Condesi Perú / Qomni AI Lab
+**Contact:** percy.rojas@condesi.pe
+**License:** Paper text MIT · QOMN runtime Apache-2.0
+**Status:** Preprint v1.0 — April 2026
+
+[Live Demo](https://desarrollador.xyz/benchmark.html) · [Paper source](paper/main.tex) · [Runtime source](https://github.com/condesi/qomn)
+
+QOMN is a deterministic execution engine that compiles closed-form engineering formulas to native x86-64 via the Cranelift JIT backend. This repository is the public preprint artifact: full paper (LaTeX + bibliography), language specification, reproducibility and installation scripts, and the 57-plan standard library covering 10 engineering domains.
 
 ---
 
@@ -488,6 +494,92 @@ QOMN is the deterministic tier, built for 2026 standards: open source, JIT-compi
 The difference between today and the full vision is **scope and maturity, not direction**.
 
 ---
+
+
+---
+
+## Qomni Cognitive OS — The Bigger Picture
+
+QOMN is one half of a larger architecture. The other half is **Qomni Cognitive OS**, a cognitive orchestration layer currently under active development. This section describes that broader system so readers understand where QOMN fits.
+
+### What is Qomni Cognitive OS?
+
+Qomni is a **cognitive operating system** that orchestrates memory, specialized engines, and decision logic — **without any dependence on large language models**. It routes incoming queries through a cascade of increasingly specialized strategies and stops at the first strategy that can answer with enough confidence.
+
+Its design philosophy is the inverse of the LLM-default pattern: instead of sending everything to a neural model and falling back to deterministic tools when needed, Qomni sends everything to deterministic tools first and explicitly rejects what it cannot resolve. Queries the system cannot answer deterministically are acknowledged as such rather than hallucinated.
+
+### Architecture at a glance
+
+```
+                       ┌─────────────────────────┐
+  User query  ──────►  │    Qomni (thinks)       │
+                       │  ─────────────────────  │
+                       │  - Intent router        │
+                       │  - Reflex cache         │
+                       │  - HDC memory (2048-bit)│
+                       │  - Expert mixture       │
+                       │  - Adversarial veto     │
+                       │  - Permanent memory     │
+                       └──────────┬──────────────┘
+                                  │ dispatch
+                                  ▼
+                       ┌─────────────────────────┐
+                       │   QOMN (executes)       │ ◄── this paper
+                       │  ─────────────────────  │
+                       │  - DSL parser           │
+                       │  - Cranelift JIT        │
+                       │  - AVX2 sweep kernel    │
+                       │  - 57 plans, 10 domains │
+                       │  - Bit-exact results    │
+                       └─────────────────────────┘
+```
+
+**Qomni decides what to compute. QOMN computes it.** The two communicate through the same public HTTP API that any external client uses. No special coupling is required, and QOMN does not depend on Qomni to function — a deliberate architectural choice to keep each layer independently meaningful.
+
+### Qomni's six strategies (all LLM-free)
+
+1. **Reflex cache** — zero-compute pattern match on previously seen queries.
+2. **Deterministic compute tier backed by QOMN** — for engineering calculations, dispatches to QOMN and returns bit-exact results.
+3. **Hyperdimensional memory** — 2,048-bit binary hypervectors for semantic similarity without neural embeddings.
+4. **Mixture of expert retrievers** — specialized indexes over curated knowledge slices, combined by consensus voting.
+5. **Adversarial veto layer** — compares candidate responses against a fact database; blocks responses containing detected contradictions.
+6. **Permanent memory tier** — persists facts across sessions in a deterministic indexed store.
+
+Notably absent: any neural-generation tier. Queries that none of the six strategies can resolve are **rejected explicitly**, not forwarded to an LLM fallback.
+
+### Why this separation matters
+
+The separation between Qomni (decides) and QOMN (computes) is the core architectural bet of the project:
+
+- **Qomni can evolve** its decision logic, memory strategies, and orchestration without touching the compute layer.
+- **QOMN can be used standalone** by anyone building their own cognitive system with different orchestration philosophies.
+- **Both layers are verifiable independently** — QOMN via the public API described in this paper; Qomni via the separate paper and artifact planned for its public release.
+- **The contract is stable and minimal** — JSON over HTTP, no binary protocol, no proprietary handshake, no neural-specific assumptions.
+
+Any team can replace either layer without breaking the other. This is unusual for cognitive architectures, which typically ship as monoliths.
+
+### Current status
+
+**QOMN is the foundation, and it is already operational.** The deterministic execution layer described in this paper is in production today at `desarrollador.xyz`, with all 57 plans live and verifiable via curl. The architecture is not hypothetical: it compiles, runs, passes tests, and responds to public traffic. This is the solid ground on which Qomni is being built.
+
+**Qomni Cognitive OS is under active development** on top of that foundation. Its core modules (intent router, reflex cache, hyperdimensional memory, expert mixture, adversarial veto, permanent memory) are being designed and validated internally against real workloads. The system is **not yet open-sourced**, but the work is advancing continuously. A separate paper and artifact will be released when Qomni is ready for independent evaluation.
+
+The sequence is deliberate: **first publish and stabilize the execution kernel (QOMN, this paper), then publish the orchestration layer (Qomni, next paper)**. This order lets reviewers and adopters validate each layer independently without waiting for the full system. No part of this QOMN paper depends on Qomni being public; every claim here is reproducible with QOMN alone.
+
+We mention Qomni here because readers encountering both names in the author's work deserve a clear picture of the relationship. **This paper is about QOMN. Qomni is the larger system already being built on top of it.**
+
+### Compact summary (both systems in one table)
+
+| Aspect | QOMN (this paper) | Qomni Cognitive OS (future paper) |
+|---|---|---|
+| Kind | Language + JIT runtime | Cognitive orchestrator |
+| Role | Executes | Decides |
+| Operation | Deterministic computation | Strategy selection + memory |
+| Mode | Stateless per call | Stateful, persistent |
+| Focus | Mathematical exactness | Contextual judgment |
+| LLM dependency | None | None |
+| Public artifact | Yes, this repo | Not yet (in development) |
+| License | Apache-2.0 | TBD (planned permissive) |
 
 ## Installation Guide
 
