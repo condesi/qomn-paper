@@ -1,0 +1,44 @@
+cff-version: 1.2.0
+message: "If you use QOMN or reference this paper, please cite it as follows."
+title: "QOMN: An Open-Source Domain-Specific Language and JIT Runtime for Deterministic Engineering Computation"
+type: generic
+authors:
+  - family-names: "Rojas Masgo"
+    given-names: "Percy"
+    email: "percy.rojas@condesi.pe"
+    affiliation: "Condesi Perú — Qomni AI Lab"
+date-released: 2026-04-19
+version: "1.0-preprint"
+repository-code: "https://github.com/condesi/qomn-paper"
+repository-artifact: "https://github.com/condesi/qomn"
+url: "https://desarrollador.xyz/"
+license: MIT
+keywords:
+  - domain-specific-language
+  - just-in-time-compilation
+  - deterministic-computing
+  - engineering-software
+  - cranelift
+  - nfpa
+  - verifiable-ai
+  - neuro-symbolic
+abstract: >
+  QOMN is an open-source domain-specific language and JIT runtime for
+  deterministic engineering computation. It compiles closed-form
+  engineering formulas to native x86-64 machine code via the Cranelift
+  backend, producing bit-exact outputs for identical inputs, with plans
+  citing their governing standards (NFPA, IEC, AISC, ASCE, Hazen-Williams,
+  and others). The system is designed as the executing layer of a hybrid
+  neuro-symbolic architecture in which reasoning and execution are treated
+  as separate concerns. All numerical claims in the paper are reproducible
+  via a public HTTP API.
+preferred-citation:
+  type: generic
+  title: "QOMN: An Open-Source Domain-Specific Language and JIT Runtime for Deterministic Engineering Computation"
+  authors:
+    - family-names: "Rojas Masgo"
+      given-names: "Percy"
+  year: 2026
+  month: 4
+  notes: "Preprint. Qomni AI Lab, Condesi Perú."
+  url: "https://github.com/condesi/qomn-paper"
