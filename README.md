@@ -1,6 +1,6 @@
 # QOMN v3.2 — Preprint Artifact
 
-**An Open-Source Domain-Specific Language and JIT Runtime for Deterministic Engineering Computation.**
+**An Open-Source Domain-Specific Language and JIT Runtime for Verifiable, Deterministic Computation.**
 
 **Author:** Percy Rojas Masgo — Condesi Perú / Qomni AI Lab
 **Contact:** percy.rojas@condesi.pe
@@ -9,7 +9,9 @@
 
 [Live Demo](https://desarrollador.xyz/benchmark.html) · [Paper source](paper/main.tex) · [Runtime source](https://github.com/condesi/qomn)
 
-QOMN is a deterministic execution engine that compiles closed-form engineering formulas to native x86-64 via the Cranelift JIT backend. This repository is the public preprint artifact: full paper (LaTeX + bibliography), language specification, reproducibility and installation scripts, and the 57-plan standard library covering 10 engineering domains.
+QOMN is the deterministic execution kernel of the **Qomni Cognitive OS**. It compiles any closed-form, citation-bearing formula (engineering, clinical, legal, financial, scientific) to native x86-64 via Cranelift JIT, producing bit-exact results for identical inputs. **The architecture imposes no ceiling on the number of plans:** the 57 plans currently shipped in the standard library are a validation sample across 10 engineering domains, not the intended final scope. The target is thousands of plans across specialized domain libraries, contributed by certified professionals against their governing standards.
+
+This repository is the public preprint artifact: full paper (LaTeX + bibliography), language specification, reproducibility and installation scripts, initial standard library, and benchmark data.
 
 ---
 
@@ -183,7 +185,7 @@ plan_pump_sizing(
 
 ---
 
-## Standard Library (v3.2 — 10 Domains, 57 Plans)
+## Standard Library (v3.2 — 10 Domains, 57 Plans — unbounded by design)
 
 > **QOMN has no domain limit.** These 13 domains are the current stdlib.
 > Any deterministic calculation expressible as a formula can become a QOMN plan.
@@ -447,7 +449,7 @@ QOMN is the deterministic tier, built for 2026 standards: open source, JIT-compi
 2. **No dependence on large language models.** QOMN performs no neural inference. Ships to offline edges, sandboxes, regulated deployments.
 3. **Persistent deterministic memory as first-class concept** — provided by the orchestration layer consuming QOMN.
 4. **Technical standards as machine-readable artifacts.** Every plan cites its governing standard (NFPA 20 §4.26, IEC 60364, AISC 360).
-5. **Scalability across multiple domains.** The architecture serves 57 plans today; target is thousands across specialized libraries.
+5. **Unlimited scalability across domains.** The architecture imposes **no upper bound on plan count**. It serves 57 plans today across 10 engineering domains as a validation sample; the target is **thousands of plans** across specialized libraries (clinical, legal, financial, aeronautical, pharmaceutical, nuclear, maritime, geotechnical), contributed by certified professionals in each field. Adding plans is an additive, distributed, community operation — no runtime changes required.
 
 ### Compact definition
 
@@ -529,7 +531,9 @@ Its design philosophy is the inverse of the LLM-default pattern: instead of send
                        │  - DSL parser           │
                        │  - Cranelift JIT        │
                        │  - AVX2 sweep kernel    │
-                       │  - 57 plans, 10 domains │
+                       │  - 57 plans / 10 domains│
+                       │    (unbounded — any   │
+                       │     closed-form domain)│
                        │  - Bit-exact results    │
                        └─────────────────────────┘
 ```
@@ -560,7 +564,7 @@ Any team can replace either layer without breaking the other. This is unusual fo
 
 ### Current status
 
-**QOMN is the foundation, and it is already operational.** The deterministic execution layer described in this paper is in production today at `desarrollador.xyz`, with all 57 plans live and verifiable via curl. The architecture is not hypothetical: it compiles, runs, passes tests, and responds to public traffic. This is the solid ground on which Qomni is being built.
+**QOMN is the foundation, and it is already operational.** The deterministic execution layer described in this paper is in production today at `desarrollador.xyz`, with all 57 initial plans live and verifiable via curl. The architecture is not hypothetical: it compiles, runs, passes tests, and responds to public traffic. **The 57-plan figure is a lower bound, not a limit** — adding new plans is a pure contribution process, no core changes required. This is the solid, unbounded ground on which Qomni is being built.
 
 **Qomni Cognitive OS is under active development** on top of that foundation. Its core modules (intent router, reflex cache, hyperdimensional memory, expert mixture, adversarial veto, permanent memory) are being designed and validated internally against real workloads. The system is **not yet open-sourced**, but the work is advancing continuously. A separate paper and artifact will be released when Qomni is ready for independent evaluation.
 
@@ -628,7 +632,7 @@ curl http://127.0.0.1:9001/api/health
   author  = {Rojas Masgo, Percy and {Qomni AI Lab}},
   year    = {2026},
   month   = {April},
-  note    = {Open Standard, MIT License. QOMN v3.2 benchmark on AMD EPYC (2026-04-19): 5.37–10.69 ns JIT hot path; 396M scenarios/sec simulation engine at 53.2% SIMD utilization; 57 plans across 10 engineering domains},
+  note    = {Open Standard, MIT License. QOMN v3.2 benchmark on AMD EPYC (2026-04-19): 5.37–10.69 ns JIT hot path; 396M scenarios/sec simulation engine at 53.2% SIMD utilization; initial 57-plan library across 10 engineering domains (architecturally unbounded — scales to any closed-form, citation-bearing domain)},
   url     = {https://github.com/condesi/qomn-lang}
 }
 ```
