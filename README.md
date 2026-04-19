@@ -426,6 +426,107 @@ and accessible everywhere — contribute to QOMN or reach out:
 
 ---
 
+
+---
+
+## Vision — What QOMN Is For
+
+QOMN is built on a single premise: deterministic computation and stochastic inference are different problems, and they deserve different tools. The deterministic side — the tier that signs building drawings, computes drug doses, sizes fire pumps, calculates payroll — has been left with Excel, proprietary CAD, and LLMs that hallucinate.
+
+QOMN is the deterministic tier, built for 2026 standards: open source, JIT-compiled, unit-typed, citation-bearing, verifiable, permissively licensed.
+
+### Five design commitments
+
+1. **Separation of thinking from executing.** QOMN is the executing layer; any orchestrator is the thinking layer. They communicate via stateless HTTP.
+2. **No dependence on large language models.** QOMN performs no neural inference. Ships to offline edges, sandboxes, regulated deployments.
+3. **Persistent deterministic memory as first-class concept** — provided by the orchestration layer consuming QOMN.
+4. **Technical standards as machine-readable artifacts.** Every plan cites its governing standard (NFPA 20 §4.26, IEC 60364, AISC 360).
+5. **Scalability across multiple domains.** The architecture serves 57 plans today; target is thousands across specialized libraries.
+
+### Compact definition
+
+> **Qomni is a cognitive operating system that orchestrates memory, models, and deterministic engines. QOMN is its core logical-execution engine — providing high-speed, verifiable computation that does not depend on probabilistic models.**
+
+---
+
+## Use Cases and Benefits
+
+| Domain | Standard | Beneficiaries |
+|---|---|---|
+| Fire protection | NFPA 13 / 20 / 72 / 101 | Fire engineers, AHJ reviewers, insurers |
+| Structural | AISC 360, ACI 318, ASCE 7 | Structural engineers, plan reviewers |
+| Electrical | NEC, IEC 60364, IEEE 141 | Electrical engineers, utilities |
+| Hydraulics | Hazen-Williams, Manning | Civil engineers, water authorities |
+| HVAC | ASHRAE 62.1, 90.1 | Mechanical engineers, LEED certifiers |
+| Financial | NIIF, SUNAT, DL 728 (Peru) | Accountants, auditors |
+| Clinical dosing (future) | Pharmacology protocols | Hospitals, pharmacy informatics |
+| Legal/fiscal (future) | National codes | Compliance, payroll |
+
+**For engineers:** plain-text plans under Git instead of black-box spreadsheets. Your signed drawing can point to the plan SHA.
+**For AI developers:** route engineering queries to QOMN (deterministic, free, microsecond-latency) instead of LLM APIs.
+**For researchers:** reference implementation of the deterministic-compute branch of hybrid neuro-symbolic architectures.
+**For regulators:** working example of certifiable AI computation, reproducible without vendor cooperation.
+
+---
+
+## Projection — Where QOMN Is Going
+
+**Near-term (6 months):** scale library from 57 to hundreds of plans, ARM64 bit-exact determinism, WebAssembly edge deployments, community contribution pipeline.
+
+**Medium-term (6–18 months):** formal verification (Lean / Coq / F*), public release of Qomni Cognitive OS (LLM-free orchestrator), standards body engagement (IEEE, ISO), peer-reviewed publication.
+
+**Long-term:** cross-industry open standard for certifiable computation, trust substrate for safety-critical AI, shared infrastructure contributed by domain experts and reviewed by standards bodies.
+
+---
+
+## Current Maturity (honest calibration)
+
+**What QOMN already is:** a working deterministic execution layer in production, architecturally sound foundation, permissively licensed, reproducible end-to-end.
+
+**What QOMN is not yet:** a fully distributed multi-tenant system validated under heavy load, a complete cognitive architecture comparable to AGI programs, a peer-reviewed standard with institutional backing.
+
+The difference between today and the full vision is **scope and maturity, not direction**.
+
+---
+
+## Installation Guide
+
+### Option A — Public API (zero install)
+
+```bash
+curl -X POST https://desarrollador.xyz/api/plan/execute \
+  -H 'Content-Type: application/json' \
+  -d '{"plan":"plan_pump_sizing","params":{"Q_gpm":500,"P_psi":100,"eff":0.75}}'
+```
+
+Returns `hp_required: 16.835017` — bit-exact every time.
+
+### Option B — Local installation (~10 min)
+
+```bash
+git clone https://github.com/condesi/qomn-paper
+cd qomn-paper
+bash scripts/install.sh
+QOMN_API_BASE=http://127.0.0.1:9001 bash scripts/reproduce.sh
+```
+
+Requires Linux or macOS, git, curl, C compiler. Rust installs automatically via rustup.
+
+### Environment variables
+
+| Variable | Default | Effect |
+|---|---|---|
+| `QOMN_API_BASE` | `https://desarrollador.xyz` | Base URL for reproducibility script |
+| `QOMN_SERVER_URL` | `https://desarrollador.xyz` | Base URL for REPL client |
+| `QOMN_NO_FMA` | unset | Disable FMA for cross-arch bit-exact reproduction |
+
+### Verify
+
+```bash
+curl http://127.0.0.1:9001/api/health
+# expect: "lang":"QOMN","version":"3.2","jit":true
+```
+
 ## Citation
 
 ```bibtex
