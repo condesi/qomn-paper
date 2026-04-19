@@ -422,7 +422,7 @@ Qomni is an independent research effort advancing a new paradigm in AI systems:
 
 If you believe in a future where AI is faster, more efficient, less dependent on massive models,
 and accessible everywhere — contribute to QOMN or reach out:
-[percy@condesi.pe](mailto:percy@condesi.pe)
+[percy.rojas@condesi.pe](mailto:percy.rojas@condesi.pe)
 
 ---
 
