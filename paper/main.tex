@@ -1,0 +1,869 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{url}
+\usepackage{enumitem}
+\usepackage[numbers,sort]{natbib}
+
+\hypersetup{colorlinks=true, linkcolor=blue, urlcolor=blue, citecolor=blue}
+
+\definecolor{codegray}{rgb}{0.95,0.95,0.95}
+\lstset{
+  backgroundcolor=\color{codegray},
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  showstringspaces=false,
+  columns=flexible
+}
+
+\title{QOMN: An Open-Source Domain-Specific Language and JIT Runtime \\
+       for Deterministic Engineering Computation}
+
+\author{Percy Rojas Masgo \\
+        Condesi Per\'u --- Qomni AI Lab \\
+        \texttt{percy.rojas@condesi.pe}}
+
+\date{April 2026 --- Preprint v1.0}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We present QOMN, an open-source domain-specific language (DSL) and just-in-time (JIT) runtime for deterministic engineering computation. Motivated by the observation that AI systems based on large language models (LLMs) are unsuitable for certification-bound domains because they produce stochastic outputs, we propose compiling closed-form engineering formulas directly to native x86-64 machine code via the Cranelift JIT backend. The resulting system produces bit-exact outputs for identical inputs (zero variance across repeated runs on the same hardware), achieves microsecond-level latency per formula evaluation, and is distributed under the Apache-2.0 license. The QOMN architecture is designed to scale to an arbitrary number of reference plans; the standard library distributed with this paper contains 57 plans as a validation sample spanning 10 engineering domains --- fire protection (NFPA 13/20/72), electrical (IEC 60364, NEC), structural (AISC 360), hydraulics (Hazen-Williams, Manning), financial/payroll, medical equipment, HVAC, cybersecurity, statistics, and transport. These 57 plans are an initial sample, not a closed catalog; the language and runtime impose no upper bound, and we estimate that faithful implementation of all mainstream engineering codes would require on the order of thousands of plans distributed across specialized libraries. We discuss the determinism--generalization tradeoff that motivates DSL design for verifiable AI, describe the compilation pipeline and runtime architecture, and report measurements obtained on a commodity virtual private server. We explicitly state the limitations of the approach: QOMN does not replace LLMs for natural-language understanding or novel problem formulation; it targets the specific subdomain of codified engineering formulas where bit-exact reproducibility is a regulatory or safety requirement. We contribute this work to the research community as a reference implementation and design case study for hybrid neuro-symbolic AI systems. A public HTTP API is provided so reviewers and practitioners may reproduce all reported measurements directly.
+
+\vspace{0.5em}
+\noindent\textbf{Artifact:} \url{https://github.com/condesi/qomn} \\
+\noindent\textbf{Live API:} \url{https://desarrollador.xyz/} \\
+\noindent\textbf{License:} Apache-2.0
+\end{abstract}
+
+\section{Introduction}
+\label{sec:intro}
+
+Engineering computation in regulated domains --- fire protection systems sized according to NFPA~13 and NFPA~20, structural members designed per AISC~360, electrical conductors sized per IEC~60364, clinical dosing calculations, payroll computation per national labor codes --- is required by statute or professional practice to be \emph{reproducible} and \emph{auditable}. A design decision that cannot be reproduced from its inputs is, in the strict sense, unverifiable.
+
+The recent proliferation of large language models as general-purpose inference engines has led to an expectation that LLMs may serve as engineering assistants. However, LLMs as deployed for chat and code generation are fundamentally unsuited to certification-bound numerical work: their outputs are stochastic (same prompt produces different numeric results on repeated queries), their internal computations are opaque to auditors, and their latency is dominated by neural inference on multi-billion-parameter networks running on accelerators that are not available in every deployment context (edge, offline, embedded).
+
+We make no claim that LLMs should be abandoned. We claim only that for the specific subdomain of \emph{closed-form engineering formulas with established domain standards}, a different technology is appropriate: a compiled domain-specific language that produces bit-exact output for identical input, with citations to the governing standard carried in the program source.
+
+This paper describes the design, implementation, and measurement of \textbf{QOMN} (QOMN Language), a DSL and JIT runtime developed for this subdomain. The contributions of this work are:
+
+\begin{enumerate}[leftmargin=*]
+\item A \textbf{language and compilation pipeline} (lexer, parser, type checker with unit dimensions, Cranelift JIT backend) targeted at engineering formulas, distributed under Apache-2.0 and reproducible on commodity hardware.
+\item A \textbf{standard library sample of 57 plans across 10 engineering domains}, each plan citing the governing standard (e.g.\ NFPA~20:2022 \S{}4.26 for fire pump sizing). We emphasize that 57 is a validation sample, not a design target: the architecture imposes no upper bound on plan count, and a full implementation of mainstream engineering codes (fire, electrical, structural, mechanical, civil, environmental, clinical, regulatory) would require thousands of plans distributed across specialized libraries maintained by domain experts.
+\item A \textbf{public HTTP API} that exposes the runtime for independent verification by reviewers, enabling reproducibility of all measurements reported in this paper without requiring local installation.
+\item A \textbf{design case study} for the broader research community on how to architect hybrid AI systems that separate deterministic compute (suitable for DSL compilation) from generative or classification tasks (suitable for LLMs or neural networks).
+\item A \textbf{discussion of limitations} detailing the domains and operations where QOMN is inappropriate and alternatives must be used.
+\end{enumerate}
+
+We do not claim QOMN is faster than LLMs; such comparisons are methodologically invalid because LLMs and JIT-compiled formulas compute fundamentally different things. We do claim that for the subset of engineering queries expressible as closed-form formulas, the JIT approach yields bit-exact reproducibility that no statistical model can currently provide.
+
+The remainder of the paper is organized as follows. Section~\ref{sec:motivation} expands the motivation and situates QOMN in the broader landscape of neuro-symbolic AI systems. Section~\ref{sec:design} describes the language and runtime design. Section~\ref{sec:impl} discusses implementation choices and the Cranelift backend. Section~\ref{sec:measurements} reports measurements from the deployed system. Section~\ref{sec:community} describes how the project contributes to the research community and developer ecosystem. Section~\ref{sec:limits} states limitations. Section~\ref{sec:threats} discusses threats to validity. Section~\ref{sec:future} sketches future work and explicit calls for external contribution. Section~\ref{sec:related} surveys related work. Section~\ref{sec:conclusion} concludes.
+
+\section{Motivation: The Determinism--Generalization Tradeoff}
+\label{sec:motivation}
+
+Modern AI systems sit on a tradeoff curve between \emph{generalization} (ability to handle novel inputs) and \emph{determinism} (guarantee of identical output for identical input). LLMs occupy the generalization extreme: they handle arbitrary natural-language inputs at the cost of stochastic outputs, hallucinated facts, and opaque reasoning chains. Traditional spreadsheets and scripts occupy the determinism extreme: they compute fixed formulas reproducibly but cannot generalize to queries outside their coded logic.
+
+Engineering practice has historically relied on deterministic tools (hand calculation, then spreadsheets, then specialized CAD/CAE software) precisely because reproducibility is a professional and legal requirement. A structural engineer who cannot reproduce a calculation from a signed drawing is potentially liable. A fire-protection designer whose sprinkler hydraulic calculation yields a different answer on re-run cannot pass authority-having-jurisdiction review.
+
+QOMN is designed for the subset of engineering tasks where the computation is known, standardized, and must be reproducible. It does not attempt to solve open-ended design problems, natural-language understanding, or tasks requiring semantic inference. It operates in the determinism extreme.
+
+\subsection{Why a DSL rather than a library?}
+
+One might ask why QOMN is a language rather than, say, a Python package. The DSL choice is motivated by three requirements that a general-purpose library cannot meet uniformly:
+
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Unit dimensioning as a type property.} Engineering formulas frequently mix quantities of different physical dimensions (pressure, flow, length). Compile-time dimension checking prevents a class of errors that runtime assertions in a library cannot prevent cheaply. QOMN encodes units (gpm, psi, m, kW, etc.) as part of its type system.
+\item \textbf{Provenance and standard citation.} Each plan in the QOMN standard library carries, in its source, a reference to the standard that governs the formula (e.g.\ \texttt{// NFPA~20:2022 \S{}4.26}). A DSL source file is self-documenting in a way a library call is not.
+\item \textbf{Deterministic execution semantics.} QOMN explicitly defines the floating-point environment (rounding mode, FMA usage, NaN handling) so that execution on any conforming runtime yields bit-exact output. A library invoked from a host language inherits whatever the host does, which typically includes non-deterministic reductions.
+\end{enumerate}
+
+\section{Language and Runtime Design}
+\label{sec:design}
+
+\subsection{Codebase overview}
+
+The QOMN reference implementation consists of 27{,}914 lines of Rust source distributed across 25 modules, plus 1{,}873 lines of integration and regression tests. The main modules are summarized in Table~\ref{tab:modules}.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lrl}
+\toprule
+Module & LOC & Responsibility \\
+\midrule
+\texttt{parser.rs}           &  735 & Lexer + AST construction \\
+\texttt{typeck.rs}           &  294 & Dimensional type checking \\
+\texttt{units.rs}            &  316 & Physical unit algebra + NFPA range table \\
+\texttt{hir.rs}              &  465 & High-level intermediate representation \\
+\texttt{bytecode.rs}         &  929 & Bytecode IR + optimizer \\
+\texttt{bytecode\_vm.rs}     &  925 & Interpreted VM (pre-JIT fallback) \\
+\texttt{jit.rs}              &  867 & Cranelift JIT backend \\
+\texttt{backend\_cpu.rs}     &  892 & AVX2/FMA kernels + native codegen \\
+\texttt{llvm\_backend.rs}    &  348 & LLVM IR 18 AOT backend (optional) \\
+\texttt{wasm\_backend.rs}    &  424 & WebAssembly text backend \\
+\texttt{plan.rs}             &  768 & v1 plan semantics \\
+\texttt{plan\_v2.rs}         & 1375 & v2 plan parser, typecheck, executor, sweep \\
+\texttt{aot\_plan.rs}        & 1625 & Ahead-of-time plan dispatch cache \\
+\texttt{simulation\_engine.rs} & 823 & SoA scenario sweep + Pareto front \\
+\texttt{batch\_oracle.rs}    &  593 & Vectorized oracle batching \\
+\texttt{batch\_plan.rs}      &  510 & Batched plan evaluation \\
+\texttt{intent\_parser.rs}   & 1583 & Optional natural-language front-end \\
+\texttt{crystal\_compiler.rs} & 532 & Binary artifact format (\texttt{.qomn}) \\
+\texttt{benchmark\_proofs.rs} & 505 & Live measurement endpoints \\
+\texttt{server.rs}           & 10602 & HTTP server + route handlers \\
+\bottomrule
+\end{tabular}
+\caption{Principal modules of the QOMN reference implementation. Total: 27{,}914 SLOC across \texttt{src/}, plus 1{,}873 SLOC of tests.}
+\label{tab:modules}
+\end{table}
+
+The dependency footprint is deliberately narrow: the core numerical runtime depends only on five Cranelift crates (\texttt{codegen, native, frontend, jit, module}, version 0.113), \texttt{serde} for JSON, \texttt{dashmap} for concurrent lookup, \texttt{rayon} for parallel sweeps, \texttt{tungstenite} for the WebSocket streaming endpoint, \texttt{ureq} for optional HTTP client access, and \texttt{libc}. Two cargo features (\texttt{no-jit}, \texttt{no-net}) allow building a stdlib-only or pure-computation variant for maximum portability.
+
+\subsection{Surface syntax}
+
+A QOMN plan is a named procedure taking typed parameters and returning a structured result with named steps. Each step invokes a primitive oracle --- a pure mathematical function corresponding to a clause in an engineering standard --- and optionally chains into a following step.
+
+\begin{lstlisting}
+// NFPA 20:2022 §4.26 — Fire pump sizing
+plan plan_pump_sizing(Q_gpm: flow, P_psi: pressure, eff: ratio = 0.70):
+  step hp_required  = nfpa20_pump_hp(Q_gpm, P_psi, eff)
+  step shutoff_p    = nfpa20_shutoff_pressure(P_psi)
+  step flow_150pct  = nfpa20_test_flow(Q_gpm, 1.5)
+  return { hp_required, shutoff_p, flow_150pct }
+\end{lstlisting}
+
+Types carrying physical dimensions (\texttt{flow}, \texttt{pressure}, \texttt{ratio}) are checked against the oracle signatures at compile time; a call with dimensionally inconsistent arguments is a compile error, not a runtime error.
+
+\subsection{Compilation pipeline}
+
+A QOMN source file is processed by the following stages:
+
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Lexer} produces a stream of typed tokens.
+\item \textbf{Parser} (\texttt{parser.rs}) builds an abstract syntax tree (AST).
+\item \textbf{Type checker} (\texttt{typeck.rs}) verifies dimensional consistency through the unit algebra described in \S\ref{sec:units}, resolves oracle identifiers against the runtime registry, and emits warnings when values exceed the physical ranges tabulated in the NFPA/IEC range table.
+\item \textbf{High-level intermediate representation (HIR)} is produced for the optimizer (\texttt{hir.rs}).
+\item \textbf{Bytecode IR} is emitted as a stable intermediate between HIR and target backends (\texttt{bytecode.rs}). The bytecode is designed to be portable across backends and contains its own optimizer pass including constant folding, dead-code elimination, and inlining of small oracle bodies.
+\item \textbf{Backend selection} produces one of three target forms:
+  \begin{itemize}
+  \item \textbf{Cranelift} native x86-64 via the \texttt{cranelift-jit} crate~\cite{cranelift} --- the default and fastest path for deployed servers. Compilation happens in milliseconds; generated code quality is adequate for numerical kernels.
+  \item \textbf{LLVM IR 18} via the \texttt{llvm\_backend} module --- for users who wish to AOT-compile plans to shared libraries for offline or embedded deployment.
+  \item \textbf{WebAssembly text (WAT)} via the \texttt{wasm\_backend} module --- for in-browser execution and sandboxed edge deployment.
+  \end{itemize}
+\item \textbf{Interpreted fallback} (\texttt{bytecode\_vm.rs}) is available for plans that have not yet crossed the JIT threshold (see \S\ref{sec:tiered-jit}) and for environments where a JIT is not desired, via the \texttt{no-jit} cargo feature.
+\end{enumerate}
+
+The three-backend design is not gratuitous. Each target serves a deployment context that the others cannot cover: Cranelift for low-latency server, LLVM for offline distribution, and WebAssembly for sandboxed or browser use. We are not aware of another engineering-oriented DSL runtime that provides all three with a shared bytecode IR as the stable intermediate.
+
+For JIT execution (the default path for the HTTP server), the generated native function is a pure numerical routine callable with C calling convention (\texttt{fn(*const f64, usize) -> f64}). Control flow is reduced to straight-line arithmetic where possible; branching in oracle bodies is minimized through branchless masks so that AVX2 vectorization across scenario sweeps is not frustrated by data-dependent jumps.
+
+\subsection{Language grammar (EBNF)}
+\label{sec:grammar}
+
+The QOMN surface language has a compact grammar focused on plan declarations and oracle calls. An Extended Backus--Naur Form (EBNF) specification of the v2 syntax is given below.
+
+\begin{lstlisting}
+program       ::= { plan_decl } ;
+
+plan_decl     ::= "plan" identifier "(" [ param_list ] ")" ":"
+                  { step_stmt }
+                  "return" "{" identifier_list "}" ;
+
+param_list    ::= param { "," param } ;
+param         ::= identifier ":" type_expr [ "=" default_value ] ;
+
+type_expr     ::= unit_type | primitive_type ;
+unit_type     ::= "flow" | "pressure" | "length" | "power"
+                | "current" | "voltage" | "area" | "ratio"
+                | "temperature" | "time" | "mass"
+                | "k_factor" | "dimensionless" ;
+primitive_type ::= "f64" | "f32" | "i64" | "bool" | "str" ;
+
+step_stmt     ::= "step" identifier "=" oracle_call ;
+oracle_call   ::= identifier "(" [ expr_list ] ")" ;
+
+expr_list     ::= expr { "," expr } ;
+expr          ::= term { ("+" | "-") term } ;
+term          ::= factor { ("*" | "/") factor } ;
+factor        ::= literal
+                | identifier
+                | oracle_call
+                | "(" expr ")"
+                | factor "^" literal     (* constant exponent *)
+                | "-" factor ;
+
+literal       ::= numeric_literal | string_literal | bool_literal ;
+
+identifier_list ::= identifier { "," identifier } ;
+identifier    ::= letter { letter | digit | "_" } ;
+\end{lstlisting}
+
+The grammar is intentionally small. Control flow (conditionals, loops) is present in the v2 plan language but is expressed through a restricted set of operators --- for example, \texttt{cond(pred, a, b)} compiles to a branchless \texttt{select} --- so that oracle bodies remain amenable to AVX2 vectorization. Arbitrary looping constructs are not part of the plan-level language; iteration happens at the sweep-engine level (\S\ref{sec:design}) where the runtime, not the user, controls the loop and its vectorization.
+
+\subsection{Using QOMN: a minimal end-to-end example}
+\label{sec:howto}
+
+The following three-step example shows the full cycle from writing a plan to obtaining a result.
+
+\textbf{Step 1 --- Declare a plan.} Save the following as \texttt{my\_calc.qomn}:
+
+\begin{lstlisting}
+// NFPA 20:2022 §4.26 — Fire pump sizing
+plan plan_pump_sizing(Q_gpm: flow, P_psi: pressure, eff: ratio = 0.70):
+  step hp_required  = nfpa20_pump_hp(Q_gpm, P_psi, eff)
+  step shutoff_p    = nfpa20_shutoff_pressure(P_psi)
+  step flow_150pct  = nfpa20_test_flow(Q_gpm, 1.5)
+  return { hp_required, shutoff_p, flow_150pct }
+\end{lstlisting}
+
+\textbf{Step 2 --- Execute via HTTP.} Assuming a QOMN server is running (public at \url{https://desarrollador.xyz/} or local after \texttt{scripts/install.sh}):
+
+\begin{lstlisting}
+curl -X POST https://desarrollador.xyz/api/plan/execute \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "plan":"plan_pump_sizing",
+    "params":{"Q_gpm":500,"P_psi":100,"eff":0.75}
+  }'
+\end{lstlisting}
+
+\textbf{Step 3 --- Interpret the response.} The server returns a JSON document containing the plan name, a list of step results (each with step name, oracle name, numeric result, and latency in nanoseconds), and a validity flag:
+
+\begin{lstlisting}
+{
+  "ok": true,
+  "plan": "plan_pump_sizing",
+  "result": {
+    "plan": "plan_pump_sizing",
+    "steps": [
+      {"step":"hp_required", "oracle":"nfpa20_pump_hp",
+       "result":16.835017, "latency_ns":0.0},
+      {"step":"shutoff_p", "oracle":"nfpa20_shutoff_pressure",
+       "result":140.000000, "latency_ns":0.0},
+      {"step":"flow_150pct", "oracle":"nfpa20_test_flow",
+       "result":750.000000, "latency_ns":0.0}
+    ]
+  }
+}
+\end{lstlisting}
+
+The same request issued ten consecutive times returns the same \texttt{16.835017} for \texttt{hp\_required} at the bit level; this is the operational definition of determinism claimed in this paper.
+
+\subsection{Physical unit algebra with standard-range validation}
+\label{sec:units}
+
+QOMN's type system encodes physical units (\texttt{gpm}, \texttt{psi}, \texttt{ft}, \texttt{hp}, \texttt{m\textsuperscript{2}}, \texttt{A}, \texttt{V}, \texttt{ohm}, \texttt{mm\textsuperscript{2}}, \texttt{kW}, \texttt{kVA}, \texttt{K-factor} in \texttt{gpm/psi\textsuperscript{0.5}}, and others) and validates values against a tabulated range table derived from NFPA and IEC standards. The table is structured as follows (reproduced from \texttt{src/units.rs}):
+
+\begin{lstlisting}
+pub static NFPA_RANGES: &[UnitRange] = &[
+  UnitRange { unit: "gpm",  lo: 0.0, hi: 500.0,
+              standard: "NFPA 13 §7.3", note: "Sprinkler flow rate" },
+  UnitRange { unit: "psi",  lo: 0.0, hi: 175.0,
+              standard: "NFPA 13 §7.1", note: "Sprinkler pressure" },
+  UnitRange { unit: "hp",   lo: 0.0, hi: 1000.0,
+              standard: "NFPA 20 §4.3", note: "Fire pump horsepower" },
+  UnitRange { unit: "gpm/psi^0.5", lo: 1.4, hi: 22.4,
+              standard: "NFPA 13 Table 6.2.3.1",
+              note: "Sprinkler K-factor" },
+  // ... 10 additional entries ...
+];
+\end{lstlisting}
+
+When a plan is invoked with a parameter outside the tabulated range, the type checker emits a warning identifying the parameter, the violated range, and the source standard. This is a deliberate design choice: the range check is advisory rather than an error, because engineers occasionally need to compute values outside standard ranges for research or forensic analysis. However, the warning carries the standard citation so that any excursion from normal range is documented.
+
+To our knowledge, this form of type system --- where the \emph{physical world} (regulatory ranges) is encoded alongside the \emph{mathematical world} (dimensional consistency) --- is uncommon in engineering DSLs. Frink, F\#, and Boost.Units handle unit dimensions well but do not carry regulatory ranges; engineering spreadsheets carry ranges implicitly in comments but cannot enforce them. The QOMN approach elevates the range table to a first-class runtime artifact that tooling can query and that plan authors must engage with.
+
+\subsection{Tiered JIT and warm-up}
+\label{sec:tiered-jit}
+
+An oracle is not JIT-compiled on first call. The runtime interprets it for the first $N$ invocations (default $N=50$) and only then compiles it to native code. This tiered strategy avoids spending Cranelift compilation time on oracles that are rarely invoked, while still delivering native-code latency for all hot-path plans.
+
+We report this threshold explicitly because the value of $N$ is a design choice with measurable impact on warm-up behavior. $N=50$ was chosen empirically: below this, cold engineering queries pay a disproportionate compilation tax; above this, steady-state throughput suffers. The threshold is exposed as a constant (\texttt{jit::JIT\_THRESHOLD}) for experimenters.
+
+\subsection{JIT micro-optimizations specific to engineering formulas}
+
+The Cranelift backend includes optimizations motivated by patterns that dominate engineering code:
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Frame-pointer elimination.} Cranelift is instructed to emit function prologues without frame-pointer save/restore (\texttt{preserve\_frame\_pointers=false}), saving approximately 2--3 ns per oracle call. For oracles that execute in tens of nanoseconds, this is a measurable fraction of total time.
+\item \textbf{Constant-exponent power inlining.} Engineering formulas contain expressions such as $x^{1.852}$ (Hazen-Williams), $x^{0.5}$ (velocity head), or $x^2$ (quadratic losses). The JIT detects when the exponent is a compile-time constant and either emits the explicit operation (\texttt{sqrt} for $0.5$, \texttt{mul} for $2$, etc.) or substitutes a \texttt{fast\_pow(x,y) = exp2(y * log2(x))} math shim that avoids the generic \texttt{libm::pow} call for non-integer constant exponents. The choice between shim and generic \texttt{pow} is made at compile time, not at each call.
+\item \textbf{Runtime CPU feature detection.} The \texttt{cranelift\_native::builder} auto-detects FMA3, AVX2, and BMI2 on the host at JIT initialization, enabling \texttt{VFMADD231SD}, 3-operand VEX encoding, and bitwise shift optimizations. The same binary therefore generates different (but bit-compatible) code on different CPUs.
+\item \textbf{No colocated libcalls, no PIC.} The JIT module is configured with \texttt{use\_colocated\_libcalls=false} and \texttt{is\_pic=false} because the generated code is loaded into a fixed address space controlled by the runtime; position-independent code would add unnecessary indirection.
+\end{itemize}
+
+These are small optimizations individually; their significance is that the runtime makes deliberate choices about each one rather than accepting Cranelift defaults. For a system whose value proposition is sub-microsecond oracle evaluation, defaults are not enough.
+
+\subsection{Determinism guarantees and limits}
+\label{sec:determinism}
+
+QOMN guarantees \emph{bit-exact reproducibility} under the following conditions, which we state explicitly:
+
+\begin{itemize}[leftmargin=*]
+\item Same CPU microarchitecture, or cross-microarchitecture with \texttt{QOMN\_NO\_FMA=1} environment variable set. Fused multiply-add (FMA) is bit-exact on a given CPU but may differ between Intel Haswell, AMD Zen~2, and ARM Neoverse due to differences in internal precision.
+\item Rounding mode fixed to \texttt{FE\_TONEAREST}.
+\item Denormals treated as zero disabled (\texttt{daz\_active=false}) to match IEEE-754 reference behavior.
+\item NaN and infinity canonicalized through a branchless AVX2 shield (see implementation).
+\item Signed zero canonicalized to \texttt{+0.0} to prevent spurious sign bits in reductions.
+\end{itemize}
+
+Under these conditions, the QOMN runtime produces the same IEEE-754 bit pattern for the same input on every invocation, regardless of concurrent load, previous cache state, or elapsed wall time. This is the operational definition of determinism used throughout this paper.
+
+Determinism \emph{across} different CPU architectures (e.g.\ reproducing a Zen~2 output on ARM Neoverse) requires \texttt{QOMN\_NO\_FMA=1}, which disables FMA fusion and at a small performance cost yields a strictly portable result.
+
+\subsection{Runtime architecture}
+
+The QOMN runtime is a single Rust binary ($\sim$39K SLOC including tests) that exposes an HTTP server, an interactive REPL, and a library API. The HTTP server is implemented using the Rust standard library's \texttt{TcpStream} (no external web framework) and accepts JSON requests on the \texttt{/api/*} namespace. Plan execution is synchronous from the client's perspective; internally, scenario sweeps for multi-objective simulation use Rayon~\cite{rayon} for parallel evaluation.
+
+The runtime includes an \emph{OracleCache}, a content-addressed cache keyed by (plan name, parameter tuple) that stores previously computed results. The cache is populated on demand and evicted by LRU; in steady-state engineering workflows, cache hit rates are substantial because the same plan is often invoked with slight parameter variations.
+
+\section{Implementation}
+\label{sec:impl}
+
+\subsection{Cranelift as the JIT target}
+
+We chose Cranelift~\cite{cranelift} over LLVM for the primary backend on three grounds: (1) compilation time is measured in milliseconds rather than seconds, which matters for a JIT invoked from a server; (2) the Cranelift dependency tree is small and pure-Rust, simplifying distribution; (3) the generated code quality is adequate for numerical kernels at the scale of engineering formulas (tens to hundreds of floating-point operations).
+
+An LLVM backend is retained in the codebase as an option for users who wish to AOT-compile plans to shared libraries for offline deployment; this path trades compilation time for marginally better code quality.
+
+\subsection{AVX2 scenario sweep engine}
+
+For multi-objective optimization queries (Pareto front exploration over parameter ranges), QOMN compiles a sweep kernel that evaluates four scenarios in parallel using AVX2 256-bit registers (4 doubles per instruction). The kernel is a pure straight-line computation over a structure-of-arrays parameter bundle; data-dependent branches are replaced with blend masks so that the AVX2 pipeline is never stalled by prediction misses.
+
+On the target hardware (Server5, a commodity VPS with AMD EPYC-class CPU, 12 cores, 48~GB RAM), the sweep kernel sustains the throughput reported in \S\ref{sec:measurements}, which we verify via a live \texttt{/api/simulation/simd\_density} endpoint.
+
+\subsection{NaN-Shield and adversarial hardening}
+
+A production engineering runtime must not crash on adversarial input. QOMN's \emph{NaN-Shield} is an AVX2 branchless preamble applied to each oracle: it masks NaN, $\pm\infty$, and denormal inputs to a canonical safe value before the compute kernel runs, and the plan result structure carries a validity flag. The shield adds approximately 3 cycles to each scenario evaluation (amortized across the AVX2 lane, $\sim$0.75 cycles per scenario).
+
+Adversarial inputs (null strings, SQL-injection-shaped payloads, 16-digit floats designed to overflow, negative flows, zero-efficiency pumps) are tested explicitly by \texttt{tests/adversarial.rs}. As of v3.2, the test harness processes 12{,}800{,}000 adversarial inputs with zero panics and zero silent wrong answers (all malformed inputs either produce a validation error or a canonicalized safe result).
+
+\section{Standard Library: Validation Sample of 57 Plans}
+\label{sec:stdlib}
+
+The QOMN standard library distributed with the v3.2 release contains 57 plans organized across 10 engineering domains. This section enumerates the library to establish what is actually available and what the ``57 plans'' figure means concretely. We emphasize again that 57 is a validation sample: the architecture imposes no ceiling, and a mature library covering the major engineering codes would likely number in the thousands.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+Domain & Standard(s) & Representative plans \\
+\midrule
+Fire protection & NFPA 13, 20, 72, 101 & \texttt{plan\_sprinkler\_system}, \texttt{plan\_pump\_sizing}, \\
+                &                       & \texttt{plan\_full\_fire\_system}, \texttt{plan\_egress} \\
+\addlinespace
+Hydraulics      & Hazen-Williams, Manning, & \texttt{plan\_pipe\_hazen}, \texttt{plan\_pipe\_manning}, \\
+                & FAO-56                & \texttt{plan\_pipe\_network\_3}, \texttt{plan\_hazen\_sweep} \\
+\addlinespace
+Electrical      & NEC, IEC 60364,       & \texttt{plan\_electrical\_load}, \texttt{plan\_electrical\_3ph}, \\
+                & IEEE 141              & \texttt{plan\_transformer}, \texttt{plan\_voltage\_drop}, \\
+                &                       & \texttt{plan\_power\_factor\_correction} \\
+\addlinespace
+Structural      & AISC 360, ACI 318,    & \texttt{plan\_beam\_analysis}, \texttt{plan\_column\_design}, \\
+                & ASCE 7                & \texttt{plan\_footing} \\
+\addlinespace
+HVAC            & ASHRAE 62.1, 90.1     & \texttt{plan\_hvac\_cooling}, \texttt{plan\_hvac\_ventilation}, \\
+                &                       & \texttt{plan\_solar\_fv} \\
+\addlinespace
+Financial       & NIIF, SUNAT, DL 728   & \texttt{plan\_factura\_peru}, \texttt{plan\_planilla}, \\
+                & (Peru payroll)        & \texttt{plan\_liquidacion\_laboral}, \texttt{plan\_depreciacion}, \\
+                &                       & \texttt{plan\_ratios\_financieros}, \texttt{plan\_multa\_sunafil}, \\
+                &                       & \texttt{plan\_break\_even}, \texttt{plan\_pricing}, \\
+                &                       & \texttt{plan\_roi}, \texttt{plan\_loan\_amortization} \\
+\addlinespace
+Medical         & EN 285, ISO 13485     & (4 plans) \\
+\addlinespace
+Cybersecurity   & CVSS v3.1,            & (4 plans including \texttt{plan\_cvss\_score}, \\
+                & NIST SP 800-53        & \texttt{plan\_bcrypt\_cost\_estimate}) \\
+\addlinespace
+Statistics      & ISO 3534              & (3 plans: descriptive, regression, hypothesis) \\
+\addlinespace
+Transport       & General mechanics     & (3 plans) \\
+\bottomrule
+\end{tabular}
+\caption{The 57 plans organized by domain. Each plan in the source tree carries an inline citation to the governing standard clause. The full enumeration is available at \url{https://desarrollador.xyz/api/plans}.}
+\label{tab:stdlib}
+\end{table}
+
+Each plan is a single \texttt{.qomn} source file (or part of a combined domain file) that invokes one or more oracles from the runtime registry. Plans compose oracle invocations into a sequence of named steps; the output of each step is addressable by name in downstream steps. This composition model is what allows a plan like \texttt{plan\_full\_fire\_system} to integrate pump sizing, pipe network hydraulics, and sprinkler demand into a single auditable evaluation.
+
+The choice of plans reflects the author's professional domain (engineering in Peru) and the validation needs of the project's early users. We make no claim that the current 57 are comprehensive or optimal; they are what was necessary to demonstrate the architecture works across diverse formula classes. Pull requests contributing plans in additional domains are welcome.
+
+\section{Measurements}
+\label{sec:measurements}
+
+All measurements in this section are reproducible by the reader via the live API at \url{https://desarrollador.xyz/}. Commands to reproduce each measurement are provided.
+
+\subsection{Measurement environment}
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Host:} Contabo VPS, AMD EPYC-class CPU (reported 2794.7~MHz nominal by QOMN), 12 cores, 48~GB RAM, Ubuntu 24.04 LTS, kernel 6.x
+\item \textbf{Compiler:} Rust 1.94 release build, Cranelift 0.113
+\item \textbf{Flags:} AVX2 and FMA detected at runtime (\texttt{cpu.fma=true, cpu.avx2=true, fma\_path=VFMADD231SD})
+\item \textbf{QOMN version:} 3.2
+\item \textbf{Plans available:} 57 (queried via \texttt{/api/health})
+\end{itemize}
+
+\subsection{Determinism (bit-exact reproducibility)}
+
+We invoke \texttt{plan\_pump\_sizing} with $(Q_{gpm}=500, P_{psi}=100, \eta=0.75)$ five times consecutively via the public API and examine the returned \texttt{hp\_required} field:
+
+\begin{lstlisting}
+$ for i in 1 2 3 4 5; do curl -sX POST \
+    https://desarrollador.xyz/api/plan/execute \
+    -H 'Content-Type: application/json' \
+    -d '{"plan":"plan_pump_sizing",
+         "params":{"Q_gpm":500,"P_psi":100,"eff":0.75}}' \
+    | grep -oE '"result":[0-9.]+' | head -1
+  done
+Run 1: "result":16.835017
+Run 2: "result":16.835017
+Run 3: "result":16.835017
+Run 4: "result":16.835017
+Run 5: "result":16.835017
+\end{lstlisting}
+
+The result is bit-exact across all five invocations. A larger experiment (10{,}000 scenarios spanning $Q_{gpm} \in [100, 599]$) produces a SHA-256 hash of the concatenated outputs; this hash is documented in the artifact and does not change across runs, machine restarts, or concurrent load. The \texttt{tests/repeatability.rs} test harness encodes this property as a regression test.
+
+\subsection{Scenario throughput}
+
+Querying the \texttt{/api/simulation/simd\_density} endpoint returns a live measurement of the scenario-evaluation throughput. At the time of submission:
+
+\begin{center}
+\begin{tabular}{lr}
+\toprule
+Metric & Value \\
+\midrule
+Measured scenarios per second & $4.76 \times 10^{8}$ \\
+Measured scenarios per cycle & 0.170 \\
+Theoretical maximum (AVX2+FMA, 4 lanes) & $7.45 \times 10^{8}$ \\
+SIMD utilization & 63.8\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The utilization figure is below the theoretical ceiling because of memory bandwidth effects on wide parameter sweeps and the overhead of the NaN-Shield. We do not claim to saturate the AVX2 pipeline; we claim only that the measured figure is achievable on commodity hardware for this class of workload.
+
+\subsection{Latency per plan execution}
+
+End-to-end HTTP latency from an external client is dominated by TCP establishment and HTTP parsing overhead, typically 2--4~ms on the same continent. The internal compute latency reported in the JSON response (\texttt{total\_ns}) is the time spent in the JIT-compiled kernel; for simple plans this is on the order of hundreds of nanoseconds to low microseconds. We emphasize that \emph{end-to-end latency to a remote client is not a fair single-number benchmark for the runtime}; the appropriate metric depends on deployment context. We therefore report both.
+
+\subsection{Sweep-based Pareto exploration}
+
+For multi-objective engineering problems (cost vs.\ risk vs.\ efficiency), QOMN computes the Pareto front via parameter sweeps evaluated under the AVX2 kernel. A typical query evaluating 10{,}000 parameter combinations and extracting the non-dominated front returns in low milliseconds end-to-end on the test hardware. Details are available via \texttt{/api/simulation/adversarial} and related endpoints.
+
+\subsection{Reproducibility commands}
+
+A single shell script \texttt{scripts/reproduce.sh} in the paper's artifact repository replays the measurements reported in this section against the live API and prints a diff against the paper's recorded values. A reviewer wishing to verify any claim may run:
+
+\begin{lstlisting}
+git clone https://github.com/condesi/qomn-paper
+cd qomn-paper
+bash scripts/reproduce.sh
+\end{lstlisting}
+
+\section{Novelty: Why the QOMN Combination Does Not Exist Elsewhere}
+\label{sec:novelty}
+
+We approach this section with care because claims of novelty in a crowded field (compilers, DSLs, scientific computing, AI systems) require evidence rather than assertion. We therefore decompose QOMN into its constituent design choices, identify the prior work that addresses each choice individually, and then argue for the originality of their \emph{combination}.
+
+\subsection{Individual components have precedent}
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{JIT-compiled numerical DSLs:} Julia~\cite{julia}, Halide, TVM, JAX all compile numerical code at runtime. Cranelift underlies Wasmtime and other WebAssembly runtimes.
+\item \textbf{Physical unit type systems:} F\# units-of-measure, Frink, Boost.Units (C++), and Haskell's \texttt{dimensional} package all encode physical dimensions as part of the type system.
+\item \textbf{Deterministic computation as a language property:} Catala~\cite{catala} is the closest precedent we have identified: a DSL designed to encode legal and fiscal law as a deterministic, auditable program. Catala validates the concept that regulated domains benefit from DSL compilation.
+\item \textbf{Reproducible scientific computing:} The reproducibility movement (ReScience, ACM Artifact Evaluation) has produced guidelines and tooling for making numerical experiments repeatable.
+\item \textbf{Engineering formula libraries:} PTC Mathcad, EES, Maple, Mathematica provide curated engineering functions, all under proprietary licenses.
+\item \textbf{Standards as computable artifacts:} Efforts exist to encode building codes as machine-readable rules (e.g.\ SMARTcodes, various BIM initiatives).
+\end{itemize}
+
+\subsection{The specific combination is new}
+
+To our knowledge, no single open-source artifact combines \emph{all} of the following properties:
+
+\begin{enumerate}[leftmargin=*]
+\item A \textbf{dedicated DSL} --- not a library in a general-purpose language --- for engineering formula evaluation.
+\item A \textbf{type system with physical unit dimensions and NFPA/IEC physical range validation} enforced at compile time.
+\item A \textbf{tiered JIT} (interpreted $\to$ Cranelift native) with explicit warm-up threshold.
+\item \textbf{Three production backends} (Cranelift, LLVM IR, WebAssembly) sharing a common bytecode IR.
+\item \textbf{Bit-exact deterministic execution} with explicit policy on FMA, rounding, denormals, and signed zero.
+\item An \textbf{AVX2 structure-of-arrays scenario sweep engine} designed around the DSL's execution semantics (not bolted on).
+\item A \textbf{branchless NaN-Shield} hardened against 12{,}800{,}000 adversarial inputs with zero panics (per \texttt{tests/adversarial.rs}).
+\item \textbf{Standard-citation provenance} in the source form of every plan.
+\item An \textbf{Apache-2.0} license.
+\item A \textbf{public HTTP API} exposing every runtime capability for independent verification by any third party.
+\item \textbf{Tested and functional}: 5 test suites (\texttt{golden}, \texttt{repeatability}, \texttt{adversarial}, \texttt{slo\_latency}, \texttt{all\_56\_plans}) with over 1{,}873 SLOC of integration tests.
+\end{enumerate}
+
+Any individual property above has precedent. We claim only that the specific conjunction --- and its availability as a verifiable, running system under a permissive license --- is novel. We invite the community to identify counterexamples; the closest precedent we have found is Catala, which addresses a related problem (regulated legal computation) but in a different domain (tax and social law) and without a JIT or SIMD sweep engine.
+
+\subsection{Verifiable, not just described}
+
+A claim of novelty in software engineering is only useful if the artifact actually runs. We emphasize:
+
+\begin{itemize}[leftmargin=*]
+\item The runtime is \textbf{currently deployed} at \url{https://desarrollador.xyz/} and has been continuously available during the preparation of this paper.
+\item Every numerical claim in this paper is \textbf{reproducible via the public API} using \texttt{curl} commands documented in \S\ref{sec:measurements} and in the accompanying \texttt{scripts/reproduce.sh}.
+\item The \textbf{source code} for both the runtime (\url{https://github.com/condesi/qomn}) and this paper (\url{https://github.com/condesi/qomn-paper}) is public under Apache-2.0 and MIT respectively.
+\item A \textbf{reproduction environment}, including installation script for local deployment, is provided in the paper artifact so that reviewers can verify results without depending on the author's infrastructure.
+\end{itemize}
+
+We prefer the reader doubt our written claims and verify them directly, rather than accept them on authority.
+
+\section{Benefits of This Contribution}
+\label{sec:benefits}
+
+We enumerate the concrete benefits that this open-source release provides to specific audiences. This section is intentionally practical rather than rhetorical.
+
+\subsection{For AI researchers}
+
+\begin{itemize}[leftmargin=*]
+\item A \textbf{reference implementation of the ``deterministic tier''} of a hybrid neuro-symbolic architecture. Papers that propose hybrid designs often stop at the conceptual level; QOMN is a concrete, runnable instance of the symbolic side, suitable for composition with any LLM or neural retriever the researcher chooses to pair it with.
+\item A \textbf{public evaluation target} for research on query routing (when should a query go to the DSL vs.\ the LLM?) and confidence calibration (when is the DSL confident enough to short-circuit the neural path?).
+\item A \textbf{benchmark against which determinism and reproducibility claims} can be tested, independent of specific neural models whose weights may change.
+\end{itemize}
+
+\subsection{For AI developers in industry}
+
+\begin{itemize}[leftmargin=*]
+\item A \textbf{cost-reducing architecture pattern}. LLM API calls for engineering queries are expensive (both financially and in latency). Routing the subset of queries that are codified formulas to QOMN eliminates that cost for that subset.
+\item A \textbf{permissive license} (Apache-2.0) that allows commercial integration without the friction of GPL-family licenses.
+\item \textbf{Production-grade hardening} already in place: the NaN-Shield, adversarial test corpus, and repeatability test suite are not academic exercises; they are prerequisites for shipping a runtime to regulated users.
+\end{itemize}
+
+\subsection{For practicing engineers}
+
+\begin{itemize}[leftmargin=*]
+\item An \textbf{open alternative} to proprietary calculation spreadsheets and closed engineering-software suites, at zero license cost.
+\item \textbf{Plans as plain-text source} under version control, enabling the same code-review and audit workflows used for software. A fire-protection calculation can be reviewed, diffed, and signed off exactly like a pull request.
+\item \textbf{Standard citation in source}: each plan names the governing standard (e.g.\ NFPA~20:2022 \S{}4.26). This is a property a spreadsheet does not provide.
+\end{itemize}
+
+\subsection{For regulators and certification bodies}
+
+\begin{itemize}[leftmargin=*]
+\item A \textbf{concrete reference} for what ``certifiable AI computation'' could mean technically: the determinism properties in \S\ref{sec:determinism} are testable against regulatory requirements.
+\item \textbf{Independent verifiability without vendor cooperation}. Because the source and runtime are open, a certification body can reproduce any claim without asking the vendor's permission.
+\item \textbf{Trail of auditability}: each plan execution produces a structured result including step-by-step intermediate values, standard references, and inputs. This trail can be preserved for compliance audits.
+\end{itemize}
+
+\subsection{For computer science and numerical analysis researchers}
+
+\begin{itemize}[leftmargin=*]
+\item A \textbf{case study in portable determinism}: the explicit FMA, rounding, and NaN-canonicalization policies described in \S\ref{sec:determinism} are of general interest for any system requiring bit-exact reproducibility.
+\item A \textbf{worked example of tiered JIT} with measured threshold values, contributing to the literature on adaptive compilation strategies.
+\item A \textbf{dataset} (the 57 plans plus the scenario sweep corpus) that can serve as input to research on program synthesis, symbolic execution, and formal verification of numerical code.
+\end{itemize}
+
+\subsection{For standards bodies}
+
+\begin{itemize}[leftmargin=*]
+\item A \textbf{machine-readable encoding of selected provisions} of NFPA~13/20/72, IEC~60364, AISC~360, and related standards. Each encoded provision is a candidate for formal discussion with the body that maintains the source standard.
+\item An \textbf{open channel} for future collaboration: standards bodies may contribute, review, or endorse plans directly via the public repository, without being bound to a commercial vendor.
+\end{itemize}
+
+\section{Contribution to the Research Community}
+\label{sec:community}
+
+This work is released under Apache-2.0 as a contribution to four audiences:
+
+\subsection{Researchers in neuro-symbolic and hybrid AI}
+
+QOMN is an existence proof that the \emph{deterministic compute} branch of a hybrid AI architecture can be realized as a compiled DSL with modest engineering effort (a single maintainer, Rust + Cranelift, open license). The system provides a reference against which larger hybrid architectures can be benchmarked. The public API, artifact, and standard-library plans are available for academic use without restriction.
+
+Researchers studying the routing of queries between symbolic and neural components may use QOMN's 57 plans as a domain-specific "deterministic tier" in their own architectures.
+
+\subsection{Developers of AI systems in industry}
+
+The QOMN architecture illustrates a pattern --- \emph{DSL for known formulas, LLM for open queries} --- that reduces operational cost and improves auditability relative to an LLM-for-everything deployment. For enterprise teams building engineering-adjacent AI products (design assistants, compliance checkers, dosing calculators), QOMN provides a starting point for the deterministic tier of such a system.
+
+The Apache-2.0 license explicitly permits commercial incorporation.
+
+\subsection{Domain engineers (fire, structural, electrical, medical)}
+
+For practicing engineers, QOMN is an open alternative to proprietary calculation spreadsheets. Because the plans cite the governing standard in source, a plan is simultaneously a calculation and a citation. The \texttt{.qomn} source format is plain text under version control; calculations diff, review, and audit like any other source artifact.
+
+Engineers are invited to contribute additional plans under Apache-2.0 via the GitHub repository.
+
+\subsection{Standards bodies and regulators}
+
+The determinism properties described in \S\ref{sec:determinism} are compatible with what regulators in certification-bound domains typically require of a calculation tool. We offer QOMN as a reference implementation for discussions of \emph{certifiable AI computation}: a category of system that is distinct from unconstrained LLMs and that may warrant its own qualification pathway.
+
+We explicitly invite formal review by standards bodies (IEEE, ISO working groups on AI safety, national professional engineering associations) and are willing to support such review through the project's GitHub repository.
+
+\section{Limitations}
+\label{sec:limits}
+
+We state limitations explicitly because any honest evaluation of QOMN must consider the problems it does not solve.
+
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Domain coverage is a sample, not a catalog.} The current standard library covers 57 plans across 10 engineering domains. We estimate this represents well under 1\% of the formulas in professional engineering practice. NFPA standards alone contain thousands of provisions with calculable consequences; AISC, ACI, and IEC add thousands more; clinical dosing and payroll regulations are similarly deep. Extension to full coverage requires either sustained community contribution, commissioned work by domain experts with certification credentials, or partnership with standards bodies. The present 57 plans should be read as a validation sample demonstrating that the architecture works across diverse formula classes, not as the intended final scope of the system.
+\item \textbf{No natural-language understanding.} QOMN does not parse queries such as "size a fire pump for a 5000~ft\textsuperscript{2} ordinary-hazard warehouse." It requires a structured plan invocation with typed parameters. Pairing QOMN with an LLM front-end for natural-language dispatch is a reasonable architecture but is out of scope for this paper.
+\item \textbf{No open design problems.} QOMN evaluates formulas; it does not solve design problems where the formula itself must be chosen. A structural designer still decides whether to use ASD or LRFD, which load combinations apply, and which beam section to try. QOMN computes the consequences of those choices.
+\item \textbf{Single-server deployment tested.} Measurements are from a single VPS. Behavior under horizontally scaled multi-tenant load is future work.
+\item \textbf{ARM portability.} The Cranelift backend supports ARM, but bit-exact cross-architecture determinism requires \texttt{QOMN\_NO\_FMA=1} and has not been characterized for performance on ARM in this paper.
+\item \textbf{No formal verification.} The runtime is Rust, which provides memory safety but not algorithmic proof. Plans have unit tests and golden tests; they do not have machine-checked proofs of correctness against their standards.
+\item \textbf{Standard library authored by a single contributor.} The plans in \texttt{stdlib/} were drafted by the author against the cited standards and reviewed by professional engineers in the author's network; a formal peer review by certified authorities-having-jurisdiction is future work.
+\end{enumerate}
+
+\section{Threats to Validity}
+\label{sec:threats}
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Single-author report.} Measurements were taken by the author on infrastructure controlled by the author. Mitigation: the public API and reproducibility script allow third-party verification without any special access.
+\item \textbf{Hardware variability.} Reported throughput is specific to the measurement hardware and will vary on other CPUs. Mitigation: we report CPU frequency and microarchitectural features; the public API's \texttt{/api/health} endpoint reports the same environment for the reviewer's own measurements.
+\item \textbf{Selection of plans.} The 57 plans in the standard library are those implemented to date; they may not be representative of all engineering practice. Mitigation: the language and runtime are general over closed-form formulas; any such formula can be encoded as a plan.
+\item \textbf{Benchmark comparisons.} We deliberately do not benchmark QOMN against LLMs for generative or open-ended tasks because such comparisons conflate different problem classes. We benchmark only against other numerical runtimes (C++, Python/NumPy) for tasks both systems can perform.
+\end{itemize}
+
+\section{Future Work and Call for Contributions}
+\label{sec:future}
+
+The QOMN project invites external contribution in the following areas:
+
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Plan scale-out to thousands.} The present 57 plans validate the architecture; the intended scope is on the order of thousands of plans organized into domain libraries (fire, structural, electrical, clinical, legal/fiscal, aeronautical, pharmaceutical, nuclear, maritime, geotechnical). This scale is reachable only through distributed contribution: certified professional engineers in each domain contributing plans with citations against their governing codes. A central question for future work is how to govern such a standard library without bottlenecking every contribution through a single maintainer --- we invite discussion on federated plan repositories, versioning of plans against versioning of standards (e.g.\ NFPA~13:2022 vs.\ NFPA~13:2025), and how to formally verify that a plan remains faithful to its citation when the underlying standard is revised.
+\item \textbf{ARM and embedded deployment.} Performance characterization on ARM Neoverse and Cortex-A series; exploration of bare-metal deployment via the WebAssembly backend.
+\item \textbf{Formal verification.} Machine-checked proofs (in Coq, Lean, or F*) that the compiled output of a QOMN plan matches the formula stated in the governing standard.
+\item \textbf{Symbolic front-end.} Integration with SymPy or Mathematica so that plans can be derived from symbolic expressions and checked for consistency with their citations.
+\item \textbf{Standards body engagement.} Participation in IEEE, ISO, or national professional-engineering working groups on AI safety and verifiable computation.
+\item \textbf{Integration studies.} Published case studies describing the use of QOMN as the deterministic tier of a larger hybrid AI system, with measured reductions in LLM API cost and improvements in auditability.
+\end{enumerate}
+
+All contributions made under Apache-2.0 are welcome via the project repository.
+
+\section{Optional Integration with a Cognitive Orchestrator (Scope Note)}
+\label{sec:cognitive-integration}
+
+This paper describes QOMN --- the DSL, JIT runtime, and engineering plan library --- in isolation. We note for the reader that the same author is actively developing a separate, complementary system named \emph{Qomni Cognitive OS}, currently \textbf{under active development and not yet released publicly}. We provide a minimal description here so that readers who encounter references to ``Qomni'' in other contexts understand the relationship between the two projects.
+
+\subsection{Brief description of Qomni Cognitive OS}
+
+Qomni Cognitive OS is a cognitive orchestration layer that is \textbf{entirely free of large language models}. It does not depend on any LLM (OpenAI, Anthropic, Google, Meta, or any other provider) for any part of its operation; neural generation is explicitly absent from its design. It is built to demonstrate that a broad class of practical queries can be resolved with determinism, without recourse to stochastic neural inference. The system routes incoming queries through a cascade of strategies, stopping at the first strategy that produces a sufficiently confident answer. The strategies currently under development include:
+
+\begin{itemize}[leftmargin=*]
+\item A \textbf{reflex cache} for zero-compute pattern matches on previously seen queries.
+\item A \textbf{deterministic-compute tier backed by QOMN}: for queries classified as engineering calculations, the orchestrator dispatches to the QOMN runtime described in this paper and returns its bit-exact result.
+\item A \textbf{hyperdimensional memory module} for semantic similarity over past interactions, using 2{,}048-bit binary hypervectors. The HDC representation allows sub-linear retrieval over large collections of prior observations without neural embedding.
+\item A \textbf{mixture of expert retrievers} with a voting protocol for cross-validation of returned knowledge. Each expert is a specialized index over a curated knowledge slice; expert outputs are combined under a consensus rule that rejects unsupported claims.
+\item An \textbf{adversarial veto layer} that compares candidate responses against a curated fact database and blocks responses containing detected contradictions, before any output is returned.
+\item A \textbf{permanent memory tier} that persists facts across sessions in a deterministic indexed store.
+\end{itemize}
+
+The design philosophy is that \emph{a meaningful fraction of practical queries can be resolved without any neural-generation step at all}. Queries that Qomni Cognitive OS cannot answer deterministically are rejected explicitly rather than passed to a fallback neural model. This is a deliberate inversion of the common hybrid-AI pattern in which an LLM is the default and deterministic components are accelerators: in Qomni Cognitive OS, determinism is the default and lack of a confident answer is an acknowledged outcome, not a reason to invoke a stochastic model. QOMN serves as the fastest intelligent layer below reflex in this cascade.
+
+\subsection{Current status and release plans}
+
+As of this paper's submission, Qomni Cognitive OS is in active internal development, is \textbf{not open-sourced}, and is not available via public endpoints. Its design, measurements, and release plans are the subject of separate future work. We do not include it in the present paper's claims of verifiability or reproducibility precisely because it is not yet public; the commitment of this paper is that every number we report can be reproduced by a reviewer using only the open QOMN artifact.
+
+\subsection{Why the separation matters}
+
+The integration surface between QOMN and any external orchestrator (whether Qomni Cognitive OS or a third-party system) is deliberately minimal: an orchestrator invokes QOMN via the same public HTTP API documented in this paper. No special coupling is required, and QOMN does not depend on any orchestrator to function. This separation is intentional; it ensures that QOMN is usable and reproducible as a standalone artifact, which is a prerequisite for the open-verifiability claim of this work.
+
+We flag this section explicitly so that readers and reviewers are not misled: when we refer in this paper to ``QOMN,'' we mean the open-source DSL and runtime described here, not the broader cognitive orchestration stack currently under development. A separate paper is planned to describe Qomni Cognitive OS once that system is ready for public release and independent evaluation.
+
+\section{Related Work}
+\label{sec:related}
+
+\textbf{Domain-specific languages for engineering.} Modelica~\cite{modelica} and OpenModelica are mature DSLs for continuous-time simulation. They target dynamic systems (differential equations) rather than the closed-form formula evaluation addressed by QOMN. Matlab Simulink occupies a similar space with proprietary tooling.
+
+\textbf{JIT compilation for numerical code.} Julia~\cite{julia} provides JIT-compiled numerical computing across a general-purpose language. QOMN differs in being a DSL rather than a general language, and in targeting deterministic reproducibility as a first-class property rather than a coincidence of the runtime.
+
+\textbf{Neuro-symbolic AI.} A substantial literature~\cite{neurosymbolic-garcez,neurosymbolic-raedt} argues for architectures combining neural and symbolic components. QOMN is a proof of concept that the symbolic component can be productively realized as a compiled DSL rather than as a rule-based system.
+
+\textbf{Verifiable computation in AI safety.} Work on interpretable machine learning and on provably correct learned components (e.g.~\cite{safe-ai-sculley}) motivates the broader context in which a system like QOMN may find use.
+
+\textbf{Cranelift and WebAssembly.} The Cranelift JIT~\cite{cranelift} underlies several WebAssembly runtimes (Wasmtime, Wasmer) and is the compilation backend chosen here for its combination of speed, code quality, and pure-Rust distribution.
+
+\section{Scientific Contribution and Foundation for Future Work}
+\label{sec:scientific}
+
+This section states, in the most honest terms the author can formulate, what this work contributes to science and engineering and what it does not. We separate narrow technical contributions (what the artifact demonstrates) from broader structural contributions (what the artifact enables future work to do).
+
+\subsection{Narrow technical contributions}
+
+The QOMN artifact, considered as a single running system, contributes the following specific technical demonstrations, each verifiable against the public API:
+
+\begin{enumerate}[leftmargin=*]
+\item \textbf{A working proof that bit-exact determinism is achievable at production latency on commodity hardware.} The runtime produces identical IEEE-754 bit patterns for identical inputs across 10{,}000-scenario sweeps, with SHA-256 hashes of output vectors stable across runs, machine restarts, and concurrent load, while sustaining throughput measured in hundreds of millions of scenarios per second on a single VPS.
+\item \textbf{A specific set of engineering micro-optimizations for JIT code generation} in the context of closed-form numerical formulas: frame-pointer elimination (measurable impact at the 2--3 ns scale), constant-exponent power inlining (for patterns like Hazen-Williams $x^{1.852}$), runtime CPU feature detection, and tiered interpretation-to-compilation with an explicit warm-up threshold.
+\item \textbf{An existence proof of a DSL type system that encodes physical-world regulatory ranges} (NFPA/IEC) alongside conventional dimensional analysis, with warnings carrying source-standard citations. This is an extension of unit-of-measure type systems into the regulatory space.
+\item \textbf{A reproducible adversarial testing methodology} for engineering runtimes: the NaN-Shield and the 12.8~M adversarial input corpus provide a template for how future deterministic-computation systems can be hardened against malformed input without sacrificing the deterministic contract on well-formed input.
+\item \textbf{A measured benchmark of AVX2 scenario-sweep throughput} on a generalizable representation (structure-of-arrays with blocked kernels), documenting SIMD utilization against a computed theoretical ceiling --- providing a baseline for future engineering runtimes to exceed.
+\end{enumerate>
+
+Each of these is narrow; none individually changes a field. Their aggregation in a single open artifact is what gives the contribution weight.
+
+\subsection{Broader structural contributions}
+
+Beyond the specific artifact, this work contributes the following structural ideas to the research community:
+
+\begin{enumerate}[leftmargin=*]
+\item \textbf{A design pattern for verifiable AI in regulated domains.} Instead of asking ``can a neural model be certified?'', the pattern asks ``can the certified portion of the problem be separated from the neural portion?''. The answer advocated here is yes: the closed-form, standardized subproblem can be compiled to a deterministic DSL, and the open-ended subproblem can remain under neural or human control. This separation offers a more tractable regulatory path than attempting to certify end-to-end neural systems.
+\item \textbf{A template for open standards encoded as machine-readable artifacts.} Each plan in QOMN's standard library is simultaneously (a) a calculation, (b) a citation to a governing clause, and (c) an executable test against that clause. This template could, if adopted by standards bodies, transform the relationship between written standards and their computational enforcement.
+\item \textbf{Evidence that a small team can build a production-grade DSL runtime.} QOMN is approximately 28k~SLOC of Rust written primarily by a single author with a narrow dependency footprint (Cranelift plus a handful of utility crates). This is evidence that the tooling available in 2026 (Rust, Cranelift, modern OSS libraries) has lowered the barrier to DSL construction sufficiently that academic groups, standards bodies, or small companies can now realistically build domain-specific runtimes where previously only major vendors could.
+\item \textbf{A concrete case for funding and research attention on verifiable computation.} The dominant narrative of AI investment currently flows toward larger language models. This work demonstrates that a parallel research direction --- smaller, verifiable, regulated computation --- is both necessary (because certification-bound domains cannot use LLMs as-is) and tractable (because the artifact exists and runs).
+\end{enumerate}
+
+\subsection{Foundation for future work}
+
+The present artifact is not an endpoint; it is a foundation on which several future research programs can be built. We list the directions we consider most promising, both for our own continuing work and for external contributors:
+
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Formal verification of the runtime and of compiled plans.} A natural next step is to mechanize the equivalence between a QOMN plan and the mathematical formula it encodes, using a proof assistant such as Coq, Lean, or F*. Work on proof-carrying code and on verified JIT compilation provides starting points.
+\item \textbf{Integration with formal standards repositories.} If NFPA, ASCE, IEC, or ISO were to publish machine-readable versions of their standards, QOMN plans could be automatically derived from and cross-checked against those repositories. This closes the gap between the standard-as-document and the standard-as-program.
+\item \textbf{Scaling to thousands of plans via federated contribution.} The present 57 plans validate the architecture; the scientific value of the library grows roughly linearly with the count of well-reviewed plans. A governance model for distributed plan contribution, with domain experts as reviewers, is a research problem in its own right and would draw on experience from systems like Wikipedia, arXiv, and open-source operating systems.
+\item \textbf{Neuro-symbolic architectures using QOMN as the symbolic component.} The author's continuing work on Qomni Cognitive OS (described briefly in \S\ref{sec:cognitive-integration}) is one instance of this direction. We explicitly invite other researchers to use QOMN as a component in their own hybrid AI architectures, and we commit to maintaining a stable public API so that such integrations do not break.
+\item \textbf{Edge and embedded deployment.} The WebAssembly backend already targets browser and sandbox contexts; extending this to microcontrollers (via \texttt{no\_std} Rust) would enable deterministic engineering computation on-device for offline safety systems. This is particularly attractive for industrial control applications where network dependence is unacceptable.
+\item \textbf{Benchmarking and dataset infrastructure.} The 57 plans, combined with the adversarial test corpus and the Pareto sweep scenarios, constitute a nascent benchmark for research on verifiable computation. Formalizing this as a public benchmark suite, with versioning of plans against versioning of standards, would serve a field that currently lacks agreed-upon testbeds.
+\end{enumerate}
+
+\subsection{The essential claim of this contribution}
+\label{sec:essential-claim}
+
+Reducing the preceding discussion to its core, the scientific contribution of this work rests on five design commitments that appear individually in the literature but whose conjunction in a single, verifiable, open-source system is not, to our knowledge, documented elsewhere:
+
+\begin{enumerate}[leftmargin=*,itemsep=0.4em]
+\item \textbf{Separation of thinking from executing.} Deciding what to compute and actually computing it are treated as distinct operations served by distinct components. QOMN is explicitly the executing layer; the deciding layer is whatever system invokes QOMN. This separation is architecturally enforced, not merely recommended.
+\item \textbf{No mandatory dependence on large language models.} The QOMN runtime does not invoke any LLM during plan evaluation, never has, and is not designed to. The broader cognitive system under development by the author (Qomni Cognitive OS, \S\ref{sec:cognitive-integration}) is likewise designed to operate without LLM dependency. This is a design choice, not an incidental property: it means the system can run offline, on edge hardware, and under regulatory regimes that forbid external neural services.
+\item \textbf{Persistent, deterministic memory as a first-class concept.} The cognitive system design described in this paper treats memory as a retrievable, deterministic store rather than as a context window or an embedding index. Although the memory subsystem is not part of the present QOMN release, its design informs the executing-layer contract that QOMN provides.
+\item \textbf{Technical standards as first-class, machine-readable artifacts.} Every plan in the standard library carries an inline citation to the governing code (NFPA, IEC, AISC, ASCE, etc.). Plans are versioned, reviewable, and diffable; standards themselves could, in principle, be co-evolved with the plans that implement them.
+\item \textbf{Scalability across multiple domains from a single architectural foundation.} The language, runtime, and plan format are domain-agnostic; only the plans are domain-specific. The same infrastructure that currently serves 57 engineering plans can, without architectural change, serve plans for clinical dosing, legal computation, financial reporting, or any other domain whose formulas are closed-form and citation-bound.
+\end{enumerate}
+
+These commitments align the project, in spirit, with research directions more commonly associated with integrated simulation systems and classical cognitive architectures than with mainstream generative AI. We state this alignment without claiming the work achieves their full scope. What we claim is that the same structural insights --- separation of concerns, rejection of pure statistical inference for verifiable problems, explicit memory, standard-bearing code, multi-domain reach --- are embodied in a running, open, verifiable artifact that any reader can inspect and use today.
+
+\subsection{A calibrated statement of maturity}
+\label{sec:maturity}
+
+Academic honesty requires stating where this work is on the maturity curve. The author's assessment, which reviewers should feel free to challenge, is as follows.
+
+QOMN, as presented in this paper, is a \emph{cognitive engine in evolution}. It is not yet:
+
+\begin{itemize}[leftmargin=*]
+\item A fully distributed system with horizontal scaling validated under multi-tenant load.
+\item A complete cognitive architecture comparable in scope to the research programs producing artificial general intelligence claims.
+\item A peer-reviewed standard with institutional backing.
+\end{itemize}
+
+It is, however:
+
+\begin{itemize}[leftmargin=*]
+\item A working deterministic execution layer, in production use, continuously available via a public API.
+\item An architecturally well-oriented foundation whose design choices extrapolate cleanly toward broader cognitive systems without requiring structural rewrites.
+\item A permissively licensed artifact that others can inspect, test, adopt, fork, or build upon without gatekeeping.
+\end{itemize}
+
+The difference between what QOMN is today and what a fully realized cognitive system would be is a difference of scope and maturity, not of direction. We are aware that this is the kind of statement an author makes about his own work; we invite the community to test it.
+
+\subsection{Concise definition of the system for external audiences}
+\label{sec:definition}
+
+For readers outside the immediate research community who need a compact statement of what this system is, the following formulation captures the intended positioning of both QOMN and the broader cognitive system it supports:
+
+\begin{quote}
+\emph{Qomni is a cognitive operating system that orchestrates memory, models, and deterministic engines. QOMN is its core logical-execution engine, providing high-speed, verifiable computation that does not depend on probabilistic models.}
+\end{quote}
+
+This paper presents only the QOMN half of that pair as a currently public, currently verifiable artifact. The Qomni half is referenced for context (\S\ref{sec:cognitive-integration}) but is the subject of separate future work.
+
+\subsection{Statement from the author}
+
+I am Percy Rojas Masgo, the author of QOMN and of this paper. I state the significance of this contribution directly, in my own voice.
+
+QOMN is a solid, well-engineered contribution to a space that has been under-served in the recent wave of AI research. It does not seek to compete with or displace any existing technology. It fills a specific gap --- open, verifiable, deterministic engineering computation --- with a working reference implementation, at a quality level (tests, documentation, public API, permissive license) that makes third-party verification and adoption straightforward.
+
+The observation underlying this work is simple: deterministic computation and adaptive statistical inference are different problems, and the same tool is rarely optimal for both. Engineering, clinical dosing, payroll, structural design, and other regulated domains have, for decades, been served by deterministic tools (hand calculation, spreadsheets, specialized CAD/CAE software). The modern research investment in generative models is well-justified for the problems those models solve well, but it has not been accompanied by equivalent investment in the deterministic tier of the computational stack. That tier still matters --- arguably, matters more now that stochastic alternatives exist --- and it deserves modern tools built to modern standards (open source, JIT-compiled, unit-typed, citation-bearing).
+
+I offer QOMN as one contribution toward that tier. My ambition here is focused rather than large: I have built one specific thing well, in an area where doing that thing well is practically useful for engineers, researchers, and regulators. I make no claim that QOMN represents a new paradigm; I claim that it is a working, verifiable, reusable artifact that others can build upon and that some users can adopt immediately.
+
+I welcome correspondence, review, and collaboration from the research and engineering communities. My contact and the project's repositories are given at the end of this paper.
+
+\section{Beyond Engineering: QOMN as a Deterministic Computational Kernel}
+\label{sec:beyond}
+
+Although this paper presents QOMN in its first validated application --- engineering formula evaluation --- the design choices of the system point toward a broader role. We outline that broader role here without making claims that are not yet supported by public artifacts, and we defer full elaboration to a separate future paper on the cognitive orchestration layer that may consume QOMN.
+
+\subsection{The pattern: thinking and executing are different operations}
+
+A recurring observation in the design of hybrid AI systems is that two classes of operation are often conflated in practice: \emph{reasoning} (deciding what to do, handling open-ended input, managing context) and \emph{execution} (performing a well-defined computation whose correctness is decidable). Contemporary LLMs are designed for the first class; their strengths there are real and valuable. For the second class, however, they are a suboptimal tool, for reasons discussed throughout this paper.
+
+The natural architectural response is to separate the two concerns: a \emph{thinking layer} manages classification, context, memory, and dialog; a \emph{execution layer} performs calculations that must be exact. The thinking layer decides which execution to invoke and how to present its result; the execution layer does not reason about input intent, it computes.
+
+QOMN is designed to be the execution layer of such an architecture. Its entire interface is invocation-oriented: a plan name, a parameter set, a bit-exact result. It contains no classification, no dialog state, no context management. This is not a limitation of QOMN; it is the shape of the contract QOMN is designed to fulfill.
+
+\subsection{Applicability beyond engineering formulas}
+
+The current 57 plans encode engineering formulas because engineering is the author's domain and the validation sample naturally came from there. The language and runtime, however, are not specific to engineering. Any computation expressible as a closed-form function of typed inputs, citable against a governing reference, is a candidate for a QOMN plan. Examples from adjacent domains include:
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Clinical dosing and pharmacokinetics.} Dose calculations per published pharmacology tables, adjusted for weight, age, renal function, and interactions. These are closed-form, citable against clinical standards, and require bit-exact reproducibility (a miscalculated dose is a patient-safety event).
+\item \textbf{Legal and fiscal computation.} Tax obligations, payroll deductions, social security contributions. The Catala project~\cite{catala} has already demonstrated the feasibility of this category; QOMN would bring the same rigor with a different surface language and a JIT backend tuned for numerical work.
+\item \textbf{Financial and actuarial formulas.} Present-value calculations, amortization schedules, actuarial reserves, risk-weighted capital. Several plans of this type are already present in the current standard library.
+\item \textbf{Environmental and safety assessments.} Dispersion modeling, thermal-comfort indices, exposure limits. These are typically codified against standards (ASHRAE, OSHA, WHO) and require reproducible evaluation for compliance.
+\item \textbf{Scientific reductions with fixed formulas.} Propagation of uncertainty, fit of known functional forms, instrument calibration. A research lab that needs reproducibility across team members and time can benefit from expressing its reductions as versioned plans.
+\end{itemize}
+
+None of these extensions requires changes to the QOMN language or runtime. They require only the plans themselves: domain experts writing citations-as-code. The architecture was built to be general over closed-form formulas precisely to enable this kind of expansion without coupling the runtime to any single domain.
+
+\subsection{QOMN as the deterministic kernel of a broader cognitive system}
+
+We can now state the forward-looking claim of this paper, carefully and with explicit caveats:
+
+\begin{quote}
+\emph{If a cognitive system is built around the separation of thinking and executing, and if that system aspires to operate without stochastic neural generation, it will need a deterministic computational kernel with the properties QOMN provides: compiled, typed, unit-aware, bit-exact, citation-bearing, verifiable. QOMN is offered as a candidate for that kernel.}
+\end{quote}
+
+The author's continuing work on Qomni Cognitive OS (see \S\ref{sec:cognitive-integration}) is one such system, explicitly LLM-free in its design. Other researchers or teams may build their own cognitive systems with different orchestration philosophies; QOMN is available under a permissive license for any such system that needs its contract.
+
+We do not make this a claim of the present paper because Qomni Cognitive OS is not yet public. The present paper's verifiable contribution is QOMN itself --- the DSL, runtime, and standard library --- and the design arguments given here for why QOMN's contract is useful beyond the current engineering sample.
+
+\subsection{A compact summary of the relationship}
+
+For readers encountering both ``QOMN'' and ``Qomni'' in the author's work, the distinction in Table~\ref{tab:qomn-vs-qomni} may be useful. The two systems are related but not equivalent; they operate at different layers of a hypothetical stack, and only QOMN is the subject of this paper.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+Aspect & QOMN & Qomni Cognitive OS \\
+\midrule
+Kind         & Language + runtime         & Cognitive orchestrator \\
+Role         & Executes                   & Decides \\
+Operation    & Deterministic computation  & Strategy selection + memory \\
+Mode         & Invocation (input$\to$output) & Perception$\to$reasoning$\to$action \\
+State        & Stateless per call         & Stateful, persistent \\
+Focus        & Mathematical exactness     & Contextual judgment \\
+Dependencies & None beyond Cranelift      & Currently depends on QOMN as its calc tier \\
+Status       & Public, Apache-2.0         & Under active development, not released \\
+Scope here   & \textbf{This paper}        & Referenced for context only (\S\ref{sec:cognitive-integration}) \\
+\bottomrule
+\end{tabular}
+\caption{QOMN and Qomni Cognitive OS at a glance. The two systems are designed to compose but are independently meaningful. The present paper concerns only QOMN.}
+\label{tab:qomn-vs-qomni}
+\end{table}
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+We have described QOMN, an open-source domain-specific language and JIT runtime for deterministic engineering computation. The system is a working existence proof that the "deterministic compute" branch of hybrid AI architectures can be realized with modest engineering effort, and that it offers properties (bit-exact reproducibility, standard-citation provenance, auditable source) that large neural models do not provide.
+
+We do not claim QOMN replaces LLMs. We claim that QOMN occupies a specific niche --- the subset of engineering work expressible as closed-form formulas against codified standards --- and that this niche is underserved by current AI tooling. By releasing the system under Apache-2.0 and exposing a public API for independent verification, we invite the research community, domain engineers, and standards bodies to examine the work, contribute to it, and incorporate its patterns into their own systems.
+
+The measurements reported in this paper can be reproduced by any reviewer via the provided script and public API. We welcome correspondence regarding the design, its limitations, and its potential extensions.
+
+\bibliographystyle{plainnat}
+\bibliography{main}
+
+\end{document}

@@ -1,0 +1,24 @@
+# LaTeX build outputs
+*.aux
+*.log
+*.toc
+*.bbl
+*.blg
+*.out
+*.synctex.gz
+*.fdb_latexmk
+*.fls
+*.nav
+*.snm
+
+# PDFs compiled from source (keep source only)
+paper/main.pdf
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# System
+.DS_Store
+Thumbs.db
