@@ -497,6 +497,406 @@ By putting calculation, citation, verification, and reproducibility into a singl
 
 This is not a marketing promise. It is a consequence of the architectural choice to make the plan the central unit of work, with every other concern attached to it.
 
+
+---
+
+## Applications and Integration Patterns
+
+QOMN is designed to serve as a **deterministic execution layer** in many different system shapes. This section sketches five integration patterns that cover most anticipated use cases, each with its own architecture diagram. These are design templates, not prescriptions; any team can adapt them.
+
+### Pattern 1 - Backend Calculation Engine (ERP / SaaS / any existing app)
+
+Use when an existing application needs auditable, citation-bearing formulas embedded in its business logic.
+
+```
++------------------------+
+|  Application frontend  |  (web, mobile, internal portal)
++-----------+------------+
+            |  REST / JSON
++-----------v------------+
+|  Business logic layer  |  (PHP, Node, Python, Java, .NET)
+|  - Auth and sessions   |
+|  - Data persistence    |
+|  - Workflow state      |
++-----------+------------+
+            |  HTTP POST /api/plan/execute
++-----------v------------+
+|      QOMN runtime      |  <-- this paper
+|  Deterministic compute |
++------------------------+
+```
+
+**Example:** a payroll module calls `plan_planilla(salary, contract_type, ...)` and receives bit-exact output with a reference to the governing labor statute. The host application stores both the result and the plan SHA for audit trail.
+
+**Latency:** 2-4 ms loopback; microseconds on the JIT hot path.
+
+---
+
+### Pattern 2 - Cognitive Orchestrator Kernel (Qomni-style)
+
+Use when building an AI system that should resolve deterministic queries deterministically and escalate only open-ended queries to other strategies.
+
+```
+                   +--------------------------+
+  User / API  -->  |   Orchestrator (Qomni)   |
+                   |  ----------------------  |
+                   |  Intent classifier       |
+                   |  Reflex cache            |
+                   |  Memory (HDC, facts)     |
+                   |  Expert mixture          |
+                   |  Adversarial veto        |
+                   +------------+-------------+
+                                | dispatch
+        +-----------------------+----------------------+
+        v                       v                      v
+   +---------+            +-----------+          +------------+
+   |  QOMN   |            | Retrieval |          | Veto and   |
+   |  kernel |            |   layer   |          | rejection  |
+   +---------+            +-----------+          +------------+
+  (this paper)
+```
+
+**Example:** a user asks "size a fire pump for 5000 ft ordinary hazard." The orchestrator classifies the intent, extracts parameters, dispatches to QOMN `plan_pump_sizing`, returns the exact result with citation. Queries not classifiable deterministically are rejected rather than hallucinated.
+
+**Relevance:** the companion system (Qomni Cognitive OS) is being built around this pattern.
+
+---
+
+### Pattern 3 - Edge Compute and Offline Deployment
+
+Use when computation must happen on a device with no network or constrained resources (remote construction sites, clinical bedside, industrial control cabinets).
+
+```
++----------------------------+
+|     Device (offline)       |
+|  ------------------------  |
+|  Local QOMN binary         |
+|  (WASM or native AArch64)  |
+|  Plan stdlib bundled       |
+|  No network, no cloud,     |
+|  no LLM, no API keys       |
+|                            |
+|  Input -> local compute -> |
+|  output (bit-identical on  |
+|  same hardware every time) |
++------------+---------------+
+             ^ sync when online
+             |
++------------+---------------+
+|  Central registry (opt.)   |
+|  for plan updates + logs   |
++----------------------------+
+```
+
+**Example:** a tablet at a remote construction site runs hydraulic calculations for a fire-protection design review without cellular coverage. When the device returns to network, audit logs sync to a central registry.
+
+---
+
+### Pattern 4 - Regulatory / Certification Pipeline
+
+Use when a regulator or certification body needs an independent way to reproduce a calculation submitted in a design package.
+
+```
+       Design submission (PDF + numbers)
+                     |
+                     v
+      +----------------------------+
+      |  Reviewer pipeline         |
+      |  ------------------------  |
+      |  1. Extract parameters     |
+      |  2. Call QOMN with same    |
+      |     inputs                 |
+      |  3. Compare bit-exact      |
+      |     output to submission   |
+      |  4. Flag discrepancies     |
+      +--------------+-------------+
+                     |
+                     v
+           Approve / Return / Flag
+```
+
+**Example:** an AHJ reviewing a fire-protection design package automatically verifies that every number in the package reproduces from the cited parameters. A discrepancy means either a transcription error or a genuine disagreement with the standard; the reviewer has machine-generated evidence, not subjective judgment.
+
+---
+
+### Pattern 5 - Scientific Reproducibility Infrastructure
+
+Use when a research lab needs its numerical reductions to survive across team members, time, and hardware.
+
+```
++-----------------------------+
+|  Lab codebase (Git repo)    |
+|  -------------------------  |
+|  .qomn plans for reductions |
+|    - uncertainty propagation|
+|    - fit of known functions |
+|    - calibration pipelines  |
+|  versioned alongside data   |
++-------------+---------------+
+              | on every analysis run
+              v
++-----------------------------+
+|  QOMN produces bit-exact    |
+|  output; hash recorded in   |
+|  lab notebook               |
++-----------------------------+
+
+Publication cites plan SHA + QOMN version.
+Anyone can reproduce the analysis later.
+```
+
+**Example:** a lab calibrates an instrument with a known functional form. The fitting procedure is a QOMN plan; the plan SHA is cited in every paper. Five years later, a graduate student re-runs the plan with archived raw data and obtains bit-identical results.
+
+---
+
+## Proposed Architectures by Industry
+
+The five patterns above are generic. This section sketches how they apply concretely to several industries, with specific plan names and integration notes.
+
+### A. Engineering and Construction (fire, structural, electrical, hydraulic)
+
+**Plans already in the library (sample):** `plan_pump_sizing`, `plan_sprinkler_system`, `plan_full_fire_system`, `plan_beam_analysis`, `plan_column_design`, `plan_footing`, `plan_electrical_load`, `plan_voltage_drop`, `plan_pipe_hazen`, `plan_pipe_manning`.
+
+```
++----------------------------+
+|  Design CAD (AutoCAD,      |
+|  Revit, proprietary tools) |
++-------------+--------------+
+              | extract params
+              v
++----------------------------+
+|  QOMN REST API             |
+|  executes plan             |
++-------------+--------------+
+              | bit-exact result + citation
+              v
++----------------------------+
+|  Design document           |
+|  (PDF or digital twin)     |
+|  embeds plan SHA in every  |
+|  calculated field          |
++----------------------------+
+```
+
+**Integration steps:** (1) build a CAD plugin that calls QOMN via HTTP; (2) the plugin replaces the CAD tool internal calculator; (3) every calculated field in the design stores the plan SHA so AHJ review can re-run it.
+
+---
+
+### B. Clinical Dosing and Pharmacology
+
+**Plans to develop:** `plan_warfarin_dose(weight, inr, age)`, `plan_vancomycin_dose(weight, crcl)`, `plan_pediatric_fluid(weight_kg, burn_tbsa_pct)`, `plan_parenteral_nutrition(...)`.
+
+```
++---------------------------+
+| Hospital EHR (Epic,       |
+| Cerner, HIS propio)       |
++-------------+-------------+
+              | patient data
+              v
++---------------------------+
+| Prescribing module        |
+| calls QOMN with patient   |
+| params                    |
++-------------+-------------+
+              | bit-exact dose + protocol ref
+              v
++---------------------------+
+| Prescription recorded     |
+| with plan SHA +           |
+| institutional protocol ID |
++---------------------------+
+```
+
+**Integration steps:** (1) clinical pharmacology team writes plans against institutional protocols; (2) each plan cites the protocol version; (3) EHR calls QOMN before writing prescription; (4) audit trail binds every dose to protocol version, making pharmacovigilance trivial.
+
+**Critical safety property:** same patient state always produces the same dose. Deviations are detectable as either a changed protocol version or a changed patient state.
+
+---
+
+### C. Legal and Fiscal (tax, payroll, compliance)
+
+**Plans already present:** `plan_factura_peru`, `plan_planilla`, `plan_liquidacion_laboral`, `plan_multa_sunafil`.
+
+**Plans to develop:** `plan_iva_calculation(country, amount)`, `plan_withholding_tax(...)`, `plan_property_tax(jurisdiction, ...)`, `plan_transfer_pricing(...)`.
+
+```
++-----------------------------+
+|  ERP financial module       |
+|  (SAP, Odoo, custom)        |
++-------------+---------------+
+              | transaction data
+              v
++-----------------------------+
+|  QOMN tax / payroll plan    |
+|  cites the exact tax law    |
+|  article or payroll statute |
++-------------+---------------+
+              | tax / deduction / obligation + citation
+              v
++-----------------------------+
+|  Invoice / payslip / return |
+|  stores plan SHA + statute  |
+|  version for audit          |
++-----------------------------+
+```
+
+**Integration steps:** (1) local tax attorneys author plans against national law; (2) on every law change, the plan version bumps, old version stays in repo; (3) any transaction recomputes with the law version valid at its date; (4) tax authority audits are straightforward: given transaction date, run the plan SHA valid then.
+
+---
+
+### D. Financial Engineering and Actuarial
+
+**Plans to develop:** `plan_loan_amortization`, `plan_black_scholes_option`, `plan_duration_bond`, `plan_net_present_value`, `plan_solvency_reserve`, `plan_capital_adequacy`.
+
+```
++----------------------------+
+| Trading / risk desk app    |
++-------------+--------------+
+              | positions + market data
+              v
++----------------------------+
+| QOMN valuation plan        |
+| closed-form: bonds,        |
+| vanilla options, PV/FV,    |
+| actuarial reserves         |
++-------------+--------------+
+              | value + model citation
+              v
++----------------------------+
+| Risk report / regulatory   |
+| filing with plan SHA       |
++----------------------------+
+```
+
+**Note:** QOMN is for **closed-form** financial math (deterministic by construction). Monte Carlo, stochastic calibration, and ML prediction are **outside its domain** - those belong to a stochastic tier.
+
+---
+
+### E. HVAC, Energy and Building Performance
+
+**Plans already present:** `plan_hvac_cooling`, `plan_hvac_ventilation`, `plan_solar_fv`.
+
+```
++---------------------------+
+| Building design software  |
+| (Revit MEP, IES, IDA-ICE) |
++-------------+-------------+
+              | building envelope + climate data
+              v
++---------------------------+
+| QOMN HVAC plan            |
+| sizes AHU, chiller,       |
+| ventilation per ASHRAE    |
++-------------+-------------+
+              | design load + ASHRAE clause
+              v
++---------------------------+
+| LEED / energy certif.     |
+| submittal with plan SHAs  |
++---------------------------+
+```
+
+---
+
+### F. Occupational Safety and Industrial Hygiene
+
+**Plans to develop:** `plan_osha_exposure_limit`, `plan_arc_flash_energy`, `plan_noise_dose(lep_d)`, `plan_confined_space_ventilation`.
+
+```
++----------------------------+
+| Site HSE management system |
++-------------+--------------+
+              | sensor / measurement data
+              v
++----------------------------+
+| QOMN exposure plan         |
+| evaluates against OSHA /   |
+| national limits            |
++-------------+--------------+
+              | pass / fail + citation
+              v
++----------------------------+
+| HSE record with plan SHA   |
+| and timestamped evidence   |
++----------------------------+
+```
+
+---
+
+### G. Agriculture and Irrigation
+
+**Plans to develop:** `plan_fao56_et(crop, climate)`, `plan_drip_irrigation(...)`, `plan_fertilizer_balance(...)`.
+
+```
++------------------------+
+|  Farm management app   |
+|  (weather + soil data) |
++-----------+------------+
+            | daily parameters
+            v
++------------------------+
+|  QOMN agro plan        |
+|  FAO-56, soil-water    |
+|  balance, nutrient need|
++-----------+------------+
+            | recommendation
+            v
++------------------------+
+|  Irrigation controller |
+|  / field report        |
++------------------------+
+```
+
+**Integration note:** this pattern is particularly compelling at the **edge** (Pattern 3). A solar-powered field controller with offline QOMN can compute irrigation needs without any cloud dependency.
+
+---
+
+### H. Manufacturing and Process Control
+
+**Plans to develop:** `plan_pid_tuning(process, target)`, `plan_thermodynamic_cycle`, `plan_material_yield_fatigue`, `plan_chemical_stoichiometry`.
+
+```
++-------------------------+
+|  MES / SCADA            |
++-----------+-------------+
+            | process setpoints
+            v
++-------------------------+
+|  QOMN on-premise        |
+|  (Pattern 3 - edge)     |
+|  computes setpoint      |
++-----------+-------------+
+            | deterministic control signal
+            v
++-------------------------+
+|  PLC / actuator         |
++-------------------------+
+```
+
+**Integration note:** safety-critical control loops can use QOMN as the **formal-verification stage**: whenever a proposed PLC setpoint is computed, QOMN recomputes it independently and compares. Discrepancies trigger a safe-state fallback.
+
+---
+
+### Cross-industry properties
+
+Every integration above shares three properties that emerge from QOMN's design:
+
+1. **Same runtime, different plans.** No per-industry language variants. The Cranelift JIT, type system, and verification apparatus are shared across clinical, legal, financial, engineering, agricultural, and industrial deployments.
+
+2. **Stateless HTTP contract.** Integration requires only speaking JSON over HTTP. No SDK, no vendor lock-in, no custom binary protocol.
+
+3. **Citation-bearing results.** Whatever the domain, every QOMN response carries a reference to the governing document (standard, statute, protocol). This is the property that makes QOMN useful for regulated work.
+
+### What QOMN is not suited for (repeated for clarity)
+
+Across all these industries, QOMN is a poor fit for:
+- Open-ended natural language (use an LLM).
+- Stochastic ML inference (use PyTorch/TF stacks).
+- Complex constraint optimization where the model itself is uncertain (use solvers like Gurobi, Z3).
+- Real-time control loops with sub-millisecond latency that cannot afford HTTP overhead (embed the QOMN Rust library directly or use the WebAssembly build).
+
+Choosing the right tool for each sub-problem is the whole point of the thinking / executing separation described in this paper.
+
 ## Use Cases and Benefits
 
 | Domain | Standard | Beneficiaries |
