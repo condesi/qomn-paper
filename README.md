@@ -457,6 +457,46 @@ QOMN is the deterministic tier, built for 2026 standards: open source, JIT-compi
 
 ---
 
+
+---
+
+## What QOMN Unifies
+
+The problem that motivates QOMN is **fragmentation**. Today, a single engineering or regulated workflow typically spans 5 to 8 different tools, each with its own semantics, versioning, and trust model:
+
+| Fragmented today | Unified in QOMN |
+|---|---|
+| Excel / Google Sheets (undocumented cells, frozen formulas) | Plain-text plan with full grammar, version-controlled |
+| Proprietary CAD/CAE calculation modules | Open-source, auditable compute at the same or higher speed |
+| Interpreted Python or Julia scripts (non-deterministic across versions) | JIT-compiled to native code, bit-exact across runs |
+| LLM API calls (stochastic, opaque, paid per token) | Deterministic call, free, microsecond-latency |
+| Rule engines / decision tables (scattered across vendors) | First-class `plan` constructs with typed parameters |
+| Hand-kept PDF standards (NFPA, IEC, AISC) | Each plan carries an inline citation to its governing clause |
+| Separate unit-conversion libraries | Unit dimensions enforced by the type system |
+| External validators (PDF review, email approval) | Compile-time + runtime checks embedded in the plan itself |
+| Ad-hoc benchmark numbers in marketing material | Live public API with reproducibility script |
+| Tribal knowledge ("Juan knows how we sized the pump") | Code signed by the engineer, diffable against the standard |
+
+### The five unifications
+
+1. **Calculation + citation.** A plan is simultaneously the code that produces the number and the reference to the standard that justifies it. You cannot separate the two; they live in the same file.
+
+2. **Computation + verification.** Every result carries validation metadata (unit dimensions, physical range checks, adversarial input handling). You cannot run a plan without the safety checks running too.
+
+3. **Source + reproducibility.** Every numerical claim in this paper is reproducible via `scripts/reproduce.sh` against either the public API or a local install. The paper and the runtime are not separate artifacts; they verify each other.
+
+4. **Engineering + beyond.** The same language, runtime, and plan format serve engineering today and any other closed-form, citation-bearing domain tomorrow (clinical dosing, legal computation, financial reporting, scientific reduction). **Unified across domains** — no language variants per field.
+
+5. **Execution + governance.** The deterministic execution layer (QOMN) and the orchestration layer (Qomni Cognitive OS, under development) share a stateless HTTP contract. The boundary is stable and minimal. You can replace either layer without breaking the other — a property typical of well-designed systems software, unusual in AI stacks.
+
+### Why unification matters
+
+Fragmentation is the largest silent cost in regulated computation. An engineer today spends more time reconciling outputs from different tools than thinking about the engineering itself. A reviewer spends more time verifying that the right version of the right standard was used than evaluating the design. A regulator spends more time on documentation format than on content.
+
+By putting calculation, citation, verification, and reproducibility into a single versioned artifact, QOMN collapses that overhead. The engineer writes one plan; the reviewer reads one file; the regulator audits one trail. Every stage uses the same source of truth, and the source of truth is executable.
+
+This is not a marketing promise. It is a consequence of the architectural choice to make the plan the central unit of work, with every other concern attached to it.
+
 ## Use Cases and Benefits
 
 | Domain | Standard | Beneficiaries |
