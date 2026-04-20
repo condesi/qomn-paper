@@ -432,7 +432,7 @@ Qomni Cognitive OS is **not just a planner, a learning loop, and a retrieval eng
 
 - **Opening QOMN creates adoption.** The execution kernel is useful standalone; anyone can adopt it today without waiting for Qomni.
 - **Keeping Qomni private preserves architectural integrity and long-term control of the project.** A complex cognitive system benefits from a stable, coherent core; the private development model protects that coherence while QOMN (the open execution kernel) is freely available for anyone to adopt.
-- **Both layers will eventually be public.** The current proprietary status of Qomni is a temporary property of its development stage, not a long-term product strategy. A separate paper and artifact will be released when Qomni is ready for independent evaluation.
+- **QOMN is and remains open under MIT.** Qomni Cognitive OS runs privately; public consumers interact with it only through the stateless HTTP contract that any external client uses. The split between open execution kernel and private orchestrator is intentional and stable.
 
 This two-layer model follows an established pattern in systems software: a permissively licensed, widely adoptable core layer combined with a more specialized layer that is stabilized before release. **Linux kernel + higher-level distributions; LLVM + Apple's Xcode toolchain; Cranelift + Bytecode Alliance's broader ecosystem.** The analogy is structural, not a claim of equivalent scale.
 
