@@ -412,12 +412,29 @@ QOMN is released as a fully open specification and implementation.
 - Exact, standard-referenced answers — no probabilistic approximation
 - Continuous simulation engine: 396M scenarios/sec measured on Server5 KVM
 
-**Important distinction:**
-- QOMN (language, compiler, runtime, stdlib) — **open MIT**
-- Qomni Engine (planner, learning loop, retrieval engine) — **proprietary**
+**Important distinction between QOMN and Qomni Cognitive OS:**
 
-Opening QOMN creates adoption. Keeping Qomni's cognitive engine closed preserves the architectural advantage.
-Same model: Linux + cloud vendors, TensorFlow + Google, LLVM + Apple.
+These are two distinct systems with different scopes, audiences, and release paths.
+
+| | QOMN | Qomni Cognitive OS |
+|---|---|---|
+| **What it is** | Deterministic execution kernel (language, compiler, JIT runtime, standard library) | Full cognitive operating system (orchestrator + deterministic memory + HDC memory + expert mixture + adversarial veto + permanent memory + reflex cache + intent router + agency layer + self-evolution + kill-switch governance) |
+| **Role** | Computes | Decides, remembers, orchestrates, verifies, governs |
+| **Modules** | Parser, typeck, HIR, bytecode, Cranelift JIT, AVX2 sweep, NaN-Shield, stdlib | 29+ integrated cognitive modules covering memory, intent classification, expert voting, adversarial detection, governance, feedback loops, and self-evolution |
+| **LLM dependency** | None | None |
+| **License** | **MIT (open)** | Currently proprietary; planned permissive release once validated |
+| **Status** | In production, public API at `desarrollador.xyz` | Under active internal development |
+| **Scope** | Stateless compute | Stateful cognitive architecture |
+
+Qomni Cognitive OS is **not just a planner, a learning loop, and a retrieval engine**. It is a complete LLM-free cognitive architecture with dozens of integrated subsystems (hyperdimensional memory, superposition intent classifier, SMoKE expert mixture, probabilistic veto, permanent memory, agency layer with authority levels, auto-evolution with 8-signal scoring, kill-switch with safe-mode fallback, and more). The reductive description that previously appeared here understated its scope; the current paragraph reflects its actual architecture.
+
+**Why this split makes sense for the project:**
+
+- **Opening QOMN creates adoption.** The execution kernel is useful standalone; anyone can adopt it today without waiting for Qomni.
+- **Developing Qomni privately preserves architectural integrity** during the design-validation phase. Releasing a complex cognitive system prematurely risks forking into incompatible variants before the core is stable.
+- **Both layers will eventually be public.** The current proprietary status of Qomni is a temporary property of its development stage, not a long-term product strategy. A separate paper and artifact will be released when Qomni is ready for independent evaluation.
+
+This two-layer model follows an established pattern in systems software: a permissively licensed, widely adoptable core layer combined with a more specialized layer that is stabilized before release. **Linux kernel + higher-level distributions; LLVM + Apple's Xcode toolchain; Cranelift + Bytecode Alliance's broader ecosystem.** The analogy is structural, not a claim of equivalent scale.
 
 ---
 
