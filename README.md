@@ -69,11 +69,11 @@ plan_pump_sizing(500, 100, 0.75)
 | Works offline? | No | Yes |
 | Cost per call | API/token cost | **Free local execution** |
 
-**Measured on Server5 KVM AMD EPYC, 2026-04-19 (live):** QOMN v3.2 executes selected engineering plans in **5.37–10.69 ns** on the JIT hot path. The simulation engine sustains **396M scenarios/sec** on the same KVM host.
+**Measured on the reference host, 2026-04-19:** QOMN v3.2 executes selected engineering plans in **5.37–10.69 ns** on the JIT hot path. The simulation engine sustains **396M scenarios/sec** on the same KVM host.
 
 ---
 
-## Benchmark Results (Server5, KVM AMD EPYC · 12-core · 48 GB · Ubuntu 24.04)
+## Benchmark Results (reference host, KVM AMD EPYC · 12-core · 48 GB · Ubuntu 24.04)
 
 > Real measured numbers, 2026-04-19 (live). JIT hot-path values use the L4 Register ABI and exclude HTTP/TCP overhead.
 > API loopback adds approximately **2–4 ms** from TCP, HTTP parsing, JSON serialization, and routing.
@@ -97,7 +97,7 @@ Full data: [`benchmarks/results_2026-04-19 (live).json`](benchmarks/results_2026
 
 ### Methodology
 
-- Hardware: Server5 KVM AMD EPYC · 12 cores · 48GB RAM · Contabo VPS · Ubuntu 24.04 LTS
+- Hardware: Reference host · AMD EPYC · 12 cores · 48GB RAM · VPS · Ubuntu 24.04 LTS
 - Runtime: QOMN v3.2 · Rust release build · Cranelift native x86-64 JIT · L4 Register ABI
 - Hot-path metric: measured nanoseconds, HTTP excluded
 - API metric: measured HTTP loopback path, including TCP + HTTP parse overhead
@@ -116,7 +116,7 @@ Full data: [`benchmarks/results_2026-04-19 (live).json`](benchmarks/results_2026
 | Pareto frontier size | **507** |
 | HTTP loopback | **~2–4 ms** |
 
-> Note: older paper drafts referenced an **86.4M scenarios/sec** simulation figure from an earlier benchmark methodology. The current reproducible Server5 KVM measurement is **396M scenarios/sec** and should be treated as the authoritative v3.2 number.
+> Note: older paper drafts referenced an **86.4M scenarios/sec** simulation figure from an earlier benchmark methodology. The current reproducible reference host measurement is **396M scenarios/sec** and should be treated as the authoritative v3.2 number.
 
 ### Why QOMN vs C++/Rust?
 
@@ -149,7 +149,7 @@ User/API call → route → parse params → plan dispatch → JIT hot path → 
    HTTP         ms        µs-ms          ns-µs          5–11 ns      output
 ```
 
-**OracleCache:** FNV-1a hash on all inputs — repeated identical calls measure approximately **12 ns** for cache probe/lookup on Server5 KVM.
+**OracleCache:** FNV-1a hash on all inputs — repeated identical calls measure approximately **12 ns** for cache probe/lookup on reference host.
 
 Compare to LLM: tokenize → model inference → autoregressive decode → seconds → approximate answer.
 
@@ -348,7 +348,7 @@ qomn-lang/
 │   ├── hello_hazen.qomn
 │   └── hello_cable.qomn
 ├── benchmarks/
-│   └── results_2026-04-19 (live).json  # v3.2 measured Server5 KVM data
+│   └── results_2026-04-19 (live).json  # v3.2 measured reference host data
 └── README.md
 ```
 
@@ -408,9 +408,9 @@ QOMN is released as a fully open specification and implementation.
 **What QOMN enables:**
 - Deterministic computation via Cranelift native JIT and L4 Register ABI
 - Physics-as-Oracle (PaO): equations as primary source of truth
-- OracleCache: FNV-1a measured cache probe around ~12 ns on Server5 KVM
+- OracleCache: FNV-1a measured cache probe around ~12 ns on reference host
 - Exact, standard-referenced answers — no probabilistic approximation
-- Continuous simulation engine: 396M scenarios/sec measured on Server5 KVM
+- Continuous simulation engine: 396M scenarios/sec measured on reference host
 
 **Important distinction between QOMN and Qomni Cognitive OS:**
 
@@ -431,7 +431,7 @@ Qomni Cognitive OS is **not just a planner, a learning loop, and a retrieval eng
 **Why this split makes sense for the project:**
 
 - **Opening QOMN creates adoption.** The execution kernel is useful standalone; anyone can adopt it today without waiting for Qomni.
-- **Developing Qomni privately preserves architectural integrity** during the design-validation phase. Releasing a complex cognitive system prematurely risks forking into incompatible variants before the core is stable.
+- **Keeping Qomni private preserves architectural integrity and long-term control of the project.** A complex cognitive system benefits from a stable, coherent core; the private development model protects that coherence while QOMN (the open execution kernel) is freely available for anyone to adopt.
 - **Both layers will eventually be public.** The current proprietary status of Qomni is a temporary property of its development stage, not a long-term product strategy. A separate paper and artifact will be released when Qomni is ready for independent evaluation.
 
 This two-layer model follows an established pattern in systems software: a permissively licensed, widely adoptable core layer combined with a more specialized layer that is stabilized before release. **Linux kernel + higher-level distributions; LLVM + Apple's Xcode toolchain; Cranelift + Bytecode Alliance's broader ecosystem.** The analogy is structural, not a claim of equivalent scale.
@@ -1023,7 +1023,7 @@ Any team can replace either layer without breaking the other. This is unusual fo
 
 **QOMN is the foundation, and it is already operational.** The deterministic execution layer described in this paper is in production today at `desarrollador.xyz`, with all 57 initial plans live and verifiable via curl. The architecture is not hypothetical: it compiles, runs, passes tests, and responds to public traffic. **The 57-plan figure is a lower bound, not a limit** — adding new plans is a pure contribution process, no core changes required. This is the solid, unbounded ground on which Qomni is being built.
 
-**Qomni Cognitive OS is under active development** on top of that foundation. Its core modules (intent router, reflex cache, hyperdimensional memory, expert mixture, adversarial veto, permanent memory) are being designed and validated internally against real workloads. The system is **not yet open-sourced**, but the work is advancing continuously. A separate paper and artifact will be released when Qomni is ready for independent evaluation.
+**Qomni Cognitive OS is under active development** on top of that foundation. Its core modules (intent router, reflex cache, hyperdimensional memory, expert mixture, adversarial veto, permanent memory) are being designed, hardened, and validated internally against real workloads. Qomni's internal code is kept private; it is exposed to consumers only through the same stateless HTTP contract that any public client uses. A separate paper focused on Qomni will be released as its subsystems mature.
 
 The sequence is deliberate: **first publish and stabilize the execution kernel (QOMN, this paper), then publish the orchestration layer (Qomni, next paper)**. This order lets reviewers and adopters validate each layer independently without waiting for the full system. No part of this QOMN paper depends on Qomni being public; every claim here is reproducible with QOMN alone.
 
@@ -1035,11 +1035,11 @@ We mention Qomni here because readers encountering both names in the author's wo
 This subsection exists to replace speculation with evidence. Qomni Cognitive OS is under active development, but that does not mean vaporware. The following components are **already implemented, compiled, deployed on the production host, and exercised by a live automated test suite**. Each item is a concrete artifact, not a roadmap aspiration.
 
 **Scale of implementation:**
-- **76,395 lines of Rust** across **82 source modules** currently in production on the reference deployment host (Server5, continuously available).
-- **14 of 14 acceptance tests pass** on the current Day-1 regression suite (maintained in-tree, re-run on every deploy).
-- **332 operations per second** sustained under the synthetic load mix used by the internal benchmark harness.
-- **49 persistent facts** committed to the permanent-memory SQLite store on the reference host, surviving restarts and cross-session reuse.
-- **Generation 6.6** is the current production release of the cognitive stack; six generations (Gen 6.0 through Gen 6.6 plus the v8.7 stability pack) have been cut, tested, and deployed incrementally.
+- A substantial Rust codebase distributed across multiple integrated modules, continuously deployed and available on the project's reference host.
+- The current regression suite passes in full and is re-run on every deployment.
+- Sustained operations per second under the internal synthetic load mix, verifiable through the live public API.
+- A persistent-memory tier (SQLite-backed) that survives process restarts and reuses facts across sessions.
+- Multiple generations of the cognitive stack have been cut, tested, and deployed incrementally; each new generation ships only after the previous one passes its regression suite.
 
 **Subsystems implemented and shipping:**
 
@@ -1060,17 +1060,17 @@ This subsection exists to replace speculation with evidence. Qomni Cognitive OS 
 
    All three are covered by unit tests (ρ less than 1, Σw equals 1, channel orthogonality) that run under `cargo test`.
 
-7. **CRYS-L pipeline integration.** QOMN acts as the deterministic compute tier of the cognitive cascade. Engineering queries that match the intent classifier are dispatched to QOMN and return with bit-exact outputs and standard citations, verifiable through the same public API that hosts this paper's reproducibility script.
+7. **QOMN pipeline integration.** QOMN acts as the deterministic compute tier of the cognitive cascade. Engineering queries that match the intent classifier are dispatched to QOMN and return with bit-exact outputs and standard citations, verifiable through the same public API that hosts this paper's reproducibility script.
 
 8. **Observability.** Live endpoints report health, SIMD utilization (~53% of theoretical AVX2+FMA peak), throughput (roughly 396 million scenarios per second), plan catalog size, and CPU feature detection. All figures in this paper are reproducible through those endpoints.
 
 **Adversarial hardening already exercised:**
-- 12.8 million adversarial inputs processed by the NaN-Shield harness with zero panics.
-- 8 parallel adversarial requests processed simultaneously with no kill-switch trip and no SafeMode fallback during the most recent regression run.
+- Millions of adversarial inputs processed by the NaN-Shield harness with zero panics.
+- Parallel adversarial request bursts processed simultaneously without kill-switch trip or SafeMode fallback.
 - Five repeated rejections of identical credential-extraction prompts returned bit-identical denial responses, confirming LTI stability under prompt-injection patterns.
 
 **What is deliberately not yet in place:**
-- Qomni Cognitive OS is **not yet open-source**. Its internal code remains private during the design-validation phase.
+- Qomni Cognitive OS keeps its internal code private. Public access is through the HTTP contract; internal modules are not distributed.
 - No production multi-tenant load has been validated beyond the synthetic 332-ops/sec regression benchmark.
 - Formal-verification proofs of runtime correctness (Lean, Coq, F*) are a stated future-work item, not a current claim.
 - Cross-architecture bit-exact determinism has been designed for (`QOMN_NO_FMA=1` flag) but not yet benchmarked on ARM or embedded targets.
